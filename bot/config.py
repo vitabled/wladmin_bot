@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     OWNER_ID: int
 
     # Database
-    DATABASE_URL: str = "postgresql+asyncpg://admin:password@localhost:5432/telegram_bot"
+    DATABASE_URL: str
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"

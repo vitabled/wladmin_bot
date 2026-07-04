@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -41,6 +42,9 @@ class LocalizationManager:
         if lang is None:
             lang = self.default_language
 
+        if not self._is_valid_language(lang):
+            lang = self.default_language
+
         if lang not in self.translations:
             lang = self.default_language
 
@@ -53,6 +57,13 @@ class LocalizationManager:
                 logger.warning(f"Missing placeholder in {key}: {e}")
 
         return text
+
+    @staticmethod
+    def _is_valid_language(lang: str) -> bool:
+        """Validate language code against whitelist pattern."""
+        if not lang or not isinstance(lang, str):
+            return False
+        return bool(re.match(r"^[a-z]{2}$", lang))
 
 
 # Global instance

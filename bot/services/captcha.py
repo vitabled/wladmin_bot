@@ -1,4 +1,5 @@
 import random
+import secrets
 import string
 from dataclasses import dataclass
 from enum import Enum
@@ -56,9 +57,9 @@ class CaptchaService:
     @staticmethod
     def generate_math_captcha() -> MathCaptcha:
         """Generate a simple math captcha."""
-        num1 = random.randint(1, 20)
-        num2 = random.randint(1, 20)
-        operation = random.choice(["+", "-", "*"])
+        num1 = secrets.randbelow(20) + 1
+        num2 = secrets.randbelow(20) + 1
+        operation = secrets.choice(["+", "-", "*"])
 
         if operation == "+":
             answer = num1 + num2
@@ -72,13 +73,13 @@ class CaptchaService:
     @staticmethod
     def generate_emoji_captcha() -> tuple[str, list[str]]:
         """Generate emoji captcha: correct emoji + 3 wrong options."""
-        correct = random.choice(CaptchaService.EMOJI_SET)
-        wrong = random.sample(
+        correct = secrets.choice(CaptchaService.EMOJI_SET)
+        wrong = secrets.SystemRandom().sample(
             [e for e in CaptchaService.EMOJI_SET if e != correct], 3
         )
 
         options = [correct] + wrong
-        random.shuffle(options)
+        secrets.SystemRandom().shuffle(options)
         return correct, options
 
     @staticmethod
