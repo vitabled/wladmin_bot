@@ -1,5 +1,6 @@
 """Text utilities for message formatting and parsing."""
 
+import html
 from typing import Optional
 
 
@@ -45,7 +46,4 @@ def truncate_text(text: str, max_length: int = 4096) -> str:
 
 def escape_html(text: str) -> str:
     """Escape HTML special characters."""
-    text = text.replace("&", "&amp;")
-    text = text.replace("<", "&lt;")
-    text = text.replace(">", "&gt;")
-    return text
+    return html.escape(text)

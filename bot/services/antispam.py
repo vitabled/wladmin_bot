@@ -29,6 +29,16 @@ class AntispamService:
         return text.strip()
 
     @staticmethod
+    def _normalize_stopwords(stopwords: list[str]) -> dict[str, str]:
+        """Pre-normalize stopwords to avoid repeated normalization.
+
+        Returns mapping of normalized -> original for first match tracking.
+        """
+        return {
+            AntispamService._normalize_text(word): word for word in stopwords
+        }
+
+    @staticmethod
     def has_stopword(text: str, stopwords: list[str]) -> Optional[str]:
         """Check if text contains any stopword, return first match."""
         if not text or not stopwords:
@@ -36,11 +46,11 @@ class AntispamService:
 
         normalized = AntispamService._normalize_text(text)
         normalized_words = set(normalized.split())
+        normalized_stopwords = AntispamService._normalize_stopwords(stopwords)
 
-        for stopword in stopwords:
-            normalized_stopword = AntispamService._normalize_text(stopword)
-            if normalized_stopword in normalized_words:
-                return stopword
+        for normalized_sw, original_sw in normalized_stopwords.items():
+            if normalized_sw in normalized_words:
+                return original_sw
 
         return None
 
