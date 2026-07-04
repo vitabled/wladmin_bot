@@ -1,0 +1,17 @@
+aiogram==3.4.1
+aiohttp==3.9.3
+sqlalchemy==2.0.25
+asyncpg==0.29.0
+alembic==1.13.1
+pydantic==2.6.4
+pydantic-settings==2.2.1
+python-dotenv==1.0.0
+redis==5.0.1
+structlog==24.1.0
+pytest==7.4.4
+pytest-asyncio==0.23.3
+pytest-cov==4.1.0
+ruff==0.3.5
+black==24.1.1
+mypy==1.8.0
+types-redis==4.6.0.11
