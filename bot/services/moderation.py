@@ -1,12 +1,11 @@
-from datetime import datetime, timedelta
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
 
 class ModerationService:
     """Pure business logic for moderation actions."""
 
     @staticmethod
-    def parse_duration(duration_str: Optional[str]) -> Optional[int]:
+    def parse_duration(duration_str: str | None) -> int | None:
         """
         Parse duration string to seconds.
 
@@ -25,6 +24,11 @@ class ModerationService:
         except (ValueError, IndexError):
             return None
 
+        # Reject non-positive values ("-30m" -> -1800, "0m") as malformed
+        # instead of letting a negative/zero duration flow downstream.
+        if value <= 0:
+            return None
+
         unit = duration_str[-1] if duration_str else ""
 
         if unit == "m":
@@ -38,8 +42,8 @@ class ModerationService:
 
     @staticmethod
     def get_unban_date(
-        duration_seconds: Optional[int],
-    ) -> Optional[datetime]:
+        duration_seconds: int | None,
+    ) -> datetime | None:
         """Calculate unban date from duration seconds."""
         if duration_seconds is None:
             return None
@@ -47,7 +51,19 @@ class ModerationService:
         return datetime.utcnow() + timedelta(seconds=duration_seconds)
 
     @staticmethod
-    def should_auto_unban(unban_date: Optional[datetime]) -> bool:
+    def get_until_date_aware(
+        duration_seconds: int | None,
+    ) -> datetime | None:
+        """Timezone-aware expiry for the Telegram Bot API (expects UTC).
+
+        ``None`` duration -> ``None`` (permanent restriction).
+        """
+        if duration_seconds is None:
+            return None
+        return datetime.now(UTC) + timedelta(seconds=duration_seconds)
+
+    @staticmethod
+    def should_auto_unban(unban_date: datetime | None) -> bool:
         """Check if user should be auto-unbanned."""
         if unban_date is None:
             return False
@@ -56,7 +72,7 @@ class ModerationService:
 
     @staticmethod
     def validate_command_args(
-        args: str, expected_count: Optional[int] = None
+        args: str, expected_count: int | None = None
     ) -> list[str]:
         """Parse and validate command arguments."""
         if expected_count:

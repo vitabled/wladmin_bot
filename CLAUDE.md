@@ -29,23 +29,40 @@
 - `bot/services/moderation.py` — Duration parsing, unban date calculation
 
 ### Handlers & Filters
-- `bot/handlers/common.py` — /start, /help
-- `bot/handlers/moderation.py` — /ban, /kick, /warn, /mute (stubs)
-- `bot/handlers/antispam.py` — Message filtering (stub)
-- `bot/filters/is_admin.py` — Admin check filter
+- `bot/handlers/common.py` — /start, /help (localized)
+- `bot/handlers/moderation.py` — /ban /unban /kick /mute /unmute /warn /unwarn /warns
+- `bot/handlers/settings_cmd.py` — /settings, /welcome, /captcha, /antispam, /addstop …
+- `bot/handlers/captcha.py` — New-member captcha (restrict → challenge → verify/timeout)
+- `bot/handlers/welcome.py` — Welcome messages + service-message cleanup
+- `bot/handlers/antispam.py` — Per-message link/forward/stopword filtering
+- `bot/handlers/actions.py` — Reusable moderation actions (ban/mute/kick/warn)
+- `bot/filters/is_admin.py` — Admin/owner check filter
 - `bot/filters/chat_type.py` — Private/group filters
 
-### Infrastructure
-- `bot/cache/redis.py` — Redis client wrapper (get/set/delete/incr)
-- `bot/i18n/loader.py` — Localization manager, language fallback
-- `bot/utils/text.py` — Text formatting (welcome placeholders, truncate)
-- `bot/utils/telegram.py` — Safe Telegram API wrappers (ban, kick, restrict)
+### Middlewares (outer, per update)
+- `bot/middlewares/database.py` — One committed session per update
+- `bot/middlewares/settings.py` — Auto-register chat, load settings (Redis→DB)
+- `bot/middlewares/i18n.py` — Locale resolution + `_` translator injection
+- `bot/middlewares/admin.py` — is_admin/is_owner detection (Redis-cached)
 
-### Testing
-- `tests/test_antispam.py` — Test-first antispam detection (13 tests)
-- `tests/test_warns.py` — Warn system logic (6 tests)
-- `tests/test_captcha.py` — Captcha generation/verification (10 tests)
-- `tests/test_moderation.py` — Duration parsing, ban dates (12 tests)
+### Infrastructure
+- `bot/db/crud.py` — Async data-access layer (repository functions)
+- `bot/logging_conf.py` — Structured JSON logging + secret redaction + rotation
+- `bot/cache/redis.py` — Redis client + settings/stopwords/captcha helpers
+- `bot/i18n/loader.py` — Localization manager, language fallback
+- `bot/utils/text.py` — HTML-safe welcome/mention rendering, duration format
+- `bot/utils/telegram.py` — Safe API wrappers (429 backoff, 400/403 handling)
+- `bot/utils/targets.py` — Resolve moderation target (reply/mention/id/@username)
+- `bot/utils/tasks.py` — Background task registry (captcha timeout, delayed delete)
+
+### Testing (114 tests)
+- `tests/test_antispam.py` — Antispam detection (service)
+- `tests/test_warns.py` — Warn system logic (service)
+- `tests/test_captcha.py` — Captcha generation/verification (service)
+- `tests/test_moderation.py` — Duration parsing, ban dates (service)
+- `tests/test_targets.py` — Target resolution
+- `tests/test_actions.py` — Warn cascade + ban/mute/kick actions
+- `tests/test_handlers_*.py` — Handlers via mocked aiogram (moderation, antispam, captcha, settings, welcome)
 
 ## Edge Cases Covered
 
@@ -82,17 +99,18 @@ Runs bot on `http://localhost:8000/webhook`, PostgreSQL, Redis.
 ```bash
 python -m venv venv
 source venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements-dev.txt   # runtime + test/lint tooling
 
-pytest tests/ -v          # Run unit tests
-make format               # Format code
-make lint                 # Check linters
+pytest tests/ -v          # Run tests (114)
+make format               # Format code (ruff + black)
+make lint                 # ruff + black --check + mypy (services)
 ```
 
 ### Database Migrations
+Applied automatically on bot startup (`alembic upgrade head`). Manually:
 ```bash
-docker-compose exec bot python -m alembic revision --autogenerate -m "desc"
-docker-compose exec bot python -m alembic upgrade head
+make migrate                                    # upgrade head in the container
+make revision m="add field"                     # autogenerate a new migration
 ```
 
 ## Decisions Made
@@ -101,15 +119,15 @@ docker-compose exec bot python -m alembic upgrade head
 2. **Redis for FSM + cache** — Fast state machine, centralized cache with TTL.
 3. **Async SQLAlchemy** — Non-blocking DB, better concurrency.
 4. **Service layer (pure functions)** — Tested independently of aiogram.
-5. **Test-first for services** — 41 unit tests covering logic edge cases.
-6. **Safe API wrappers** — Catch TelegramBadRequest (400) and TelegramForbiddenError (403).
+5. **Test-first for services** — services unit-tested; handlers via mocked aiogram (114 total).
+6. **Safe API wrappers** — retry 429 (`TelegramRetryAfter`) with backoff; catch 400/403.
+7. **Migrations auto-applied on startup** — `alembic upgrade head` runs in a worker thread before the webhook is served (schema failure is fatal; webhook-set failure is not).
 
 ## Known Limitations
 
-- Handlers (`moderation.py`, `antispam.py`, etc.) are stubs — need full implementation
-- No real webhook URL setup (example: `/webhook` path)
-- Alembic migrations not yet auto-generated (manual `env.py` setup)
-- Redis persistence not configured in docker-compose (volatile)
+- New-member detection uses `message.new_chat_members` (not `chat_member` updates); works when the bot is admin.
+- `@username` targeting resolves via the cached `users` table, falling back to `bot.get_chat` (only users the bot has seen or public entities).
+- e2e against real Telegram not run in CI (no test bot/domain); verified via `docker compose up` (services healthy, migrations applied, `/health` ok).
 
 ## Phase 2+ Roadmap
 
@@ -134,9 +152,9 @@ See `.env.example`:
 
 ## Testing Strategy
 
-**Unit tests (41)**: Pure functions in services + edge cases
-**Integration tests**: Planned (mocked aiogram, real DB in Docker)
-**e2e tests**: Manual with real Telegram (requires bot token, domain)
+**Unit tests**: Pure service functions + edge cases (antispam, warns, captcha, moderation, targets).
+**Handler tests**: aiogram handlers with mocked Message/CallbackQuery/Bot/session (moderation, antispam, captcha, settings, welcome, actions).
+**e2e**: `docker compose up` — services healthy, migrations applied, `/health` responds. Real-Telegram e2e is manual (needs bot token + domain).
 
 ## Performance Notes
 

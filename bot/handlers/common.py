@@ -1,49 +1,27 @@
-"""Common handlers: /start, /help."""
+"""Common handlers: /start, /help (localized, work in PM and groups)."""
+
+from __future__ import annotations
+
+from collections.abc import Callable
 
 from aiogram import Router, types
-from aiogram.filters import Command
-from aiogram.filters.command import CommandStart
+from aiogram.filters import Command, CommandStart
+
+from bot.middlewares.base import is_group
 
 router = Router()
 
 
 @router.message(CommandStart())
-async def cmd_start(message: types.Message):
-    """Handle /start command."""
-    text = """👋 Welcome to Telegram Group Admin Bot!
-
-I help manage your Telegram groups with:
-• 📋 Moderation commands (/ban, /mute, /kick, /warn)
-• 🤖 Captcha for new members
-• 🚫 Antispam filters
-• 📝 Custom welcome messages
-• ⚙️ Flexible settings
-
-Use /help to see all commands."""
-    await message.answer(text)
+async def cmd_start(message: types.Message, _: Callable[..., str]) -> None:
+    """Handle /start."""
+    await message.answer(_("cmd_start"))
 
 
 @router.message(Command("help"))
-async def cmd_help(message: types.Message):
-    """Handle /help command."""
-    if message.chat and message.chat.type == "private":
-        text = """📚 Available Commands:
-
-/start - Show welcome message
-/help - Show this help
-
-More commands in group settings."""
+async def cmd_help(message: types.Message, _: Callable[..., str]) -> None:
+    """Handle /help — group variant lists moderation commands."""
+    if is_group(message.chat):
+        await message.answer(_("cmd_help_group"))
     else:
-        text = """📚 Moderation Commands (admins only):
-
-/ban [duration] [reason] - Ban user
-/unban - Unban user
-/kick - Remove user
-/mute [duration] [reason] - Mute user
-/unmute - Unmute user
-/warn [reason] - Warn user
-/unwarn - Remove last warning
-/warns - Show user warnings
-/settings - Show chat settings"""
-
-    await message.answer(text)
+        await message.answer(_("cmd_help_private"))

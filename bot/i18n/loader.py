@@ -4,7 +4,6 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -12,9 +11,12 @@ logger = logging.getLogger(__name__)
 class LocalizationManager:
     """Manage localizations for multiple languages."""
 
-    def __init__(self, locales_dir: str = "bot/i18n"):
-        self.locales_dir = Path(locales_dir)
-        self.translations: Dict[str, Dict[str, str]] = {}
+    def __init__(self, locales_dir: str | None = None):
+        # Default to this package's directory so it resolves regardless of cwd.
+        self.locales_dir = (
+            Path(locales_dir) if locales_dir else Path(__file__).resolve().parent
+        )
+        self.translations: dict[str, dict[str, str]] = {}
         self.default_language = "ru"
 
     def load_all(self) -> None:
@@ -27,7 +29,7 @@ class LocalizationManager:
         """Load single language file."""
         try:
             lang_file = self.locales_dir / f"{lang}.json"
-            with open(lang_file, "r", encoding="utf-8") as f:
+            with open(lang_file, encoding="utf-8") as f:
                 self.translations[lang] = json.load(f)
             logger.info(f"Loaded language: {lang}")
         except FileNotFoundError:
@@ -35,9 +37,7 @@ class LocalizationManager:
         except json.JSONDecodeError as e:
             logger.error(f"Invalid JSON in {lang}.json: {e}")
 
-    def get(
-        self, key: str, lang: Optional[str] = None, **kwargs
-    ) -> str:
+    def get(self, key: str, lang: str | None = None, **kwargs) -> str:
         """Get translation for key."""
         if lang is None:
             lang = self.default_language
@@ -48,13 +48,17 @@ class LocalizationManager:
         if lang not in self.translations:
             lang = self.default_language
 
-        text = self.translations.get(lang, {}).get(key, key)
+        # Key missing in the chosen language → fall back to default language,
+        # then to the key itself (so nothing crashes on an untranslated key).
+        text = self.translations.get(lang, {}).get(key)
+        if text is None:
+            text = self.translations.get(self.default_language, {}).get(key, key)
 
         if kwargs:
             try:
                 text = text.format(**kwargs)
-            except KeyError as e:
-                logger.warning(f"Missing placeholder in {key}: {e}")
+            except (KeyError, IndexError, ValueError) as e:
+                logger.warning(f"Cannot format translation {key}: {e}")
 
         return text
 
@@ -67,7 +71,7 @@ class LocalizationManager:
 
 
 # Global instance
-_i18n: Optional[LocalizationManager] = None
+_i18n: LocalizationManager | None = None
 
 
 def get_i18n() -> LocalizationManager:

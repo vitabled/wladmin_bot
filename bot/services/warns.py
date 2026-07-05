@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass
@@ -9,16 +8,14 @@ class WarnResult:
     warned: bool
     warn_count: int
     limit_reached: bool
-    action_triggered: Optional[str] = None
+    action_triggered: str | None = None
 
 
 class WarnsService:
     """Pure business logic for warn system."""
 
     @staticmethod
-    def calculate_warn_count(
-        active_warns: int, warn_limit: int
-    ) -> tuple[int, bool]:
+    def calculate_warn_count(active_warns: int, warn_limit: int) -> tuple[int, bool]:
         """Calculate total warn count and check if limit is reached."""
         return active_warns, active_warns >= warn_limit
 
@@ -29,7 +26,7 @@ class WarnsService:
 
     @staticmethod
     def get_action(
-        warn_action: str, warn_action_duration: Optional[int] = None
-    ) -> tuple[str, Optional[int]]:
+        warn_action: str, warn_action_duration: int | None = None
+    ) -> tuple[str, int | None]:
         """Get moderation action to apply."""
         return warn_action, warn_action_duration

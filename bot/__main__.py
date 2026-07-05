@@ -1,113 +1,152 @@
-"""Main entry point for the bot."""
+"""Webhook entry point: wiring, middlewares, routers, graceful lifecycle."""
+
+from __future__ import annotations
 
 import asyncio
 import logging
-import signal
 
-from aiohttp import web
 from aiogram import Bot, Dispatcher
-from aiogram.types import Update
-from aiogram.webhook.aiohttp_server import (
-    SimpleRequestHandler,
-    setup_application,
-)
+from aiogram.client.default import DefaultBotProperties
+from aiogram.fsm.storage.redis import RedisStorage
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+from aiohttp import web
 
-from bot.config import get_settings, configure_logging
-from bot.db.session import init_db, get_async_session_maker
 from bot.cache.redis import RedisClient
-from bot.handlers import common, moderation, antispam
+from bot.config import configure_logging, get_settings
+from bot.db.session import create_engine, get_async_session_maker
+from bot.handlers import (
+    antispam,
+    captcha,
+    common,
+    moderation,
+    settings_cmd,
+    welcome,
+)
+from bot.i18n.loader import get_i18n
+from bot.middlewares.admin import AdminMiddleware
+from bot.middlewares.database import DatabaseMiddleware
+from bot.middlewares.i18n import I18nMiddleware
+from bot.middlewares.settings import SettingsMiddleware
+from bot.utils.tasks import cancel_all
 
 logger = logging.getLogger(__name__)
 
 
+def _run_migrations() -> None:
+    """Apply Alembic migrations to head (runs in a worker thread)."""
+    from alembic import command
+    from alembic.config import Config
+
+    cfg = Config("alembic.ini")
+    command.upgrade(cfg, "head")
+
+
+def build_dispatcher(
+    session_maker, redis: RedisClient, owner_id: int, cache_ttl: int
+) -> Dispatcher:
+    """Create the Dispatcher, register middlewares (outer) and routers."""
+    storage = RedisStorage.from_url(get_settings().REDIS_URL)
+    dp = Dispatcher(storage=storage)
+
+    i18n = get_i18n()
+    observers = (dp.message, dp.edited_message, dp.callback_query)
+    for observer in observers:
+        observer.outer_middleware(DatabaseMiddleware(session_maker))
+        observer.outer_middleware(SettingsMiddleware(redis, cache_ttl))
+        observer.outer_middleware(I18nMiddleware(i18n))
+        observer.outer_middleware(AdminMiddleware(redis, owner_id))
+
+    # Order matters: specific command/event routers first, catch-all antispam last.
+    dp.include_router(common.router)
+    dp.include_router(settings_cmd.router)
+    dp.include_router(moderation.router)
+    dp.include_router(captcha.router)
+    dp.include_router(welcome.router)
+    dp.include_router(antispam.router)
+
+    dp["redis"] = redis
+    dp["session_maker"] = session_maker
+    return dp
+
+
 async def on_startup(app: web.Application) -> None:
-    """Initialize bot and connect to services."""
     settings = get_settings()
-    configure_logging(settings)
+    bot: Bot = app["bot"]
+    redis: RedisClient = app["redis"]
 
-    # Initialize database
-    engine = await init_db()
-    session_maker = get_async_session_maker(engine)
-    app["session_maker"] = session_maker
+    await redis.connect()
+    try:
+        await asyncio.to_thread(_run_migrations)
+        logger.info("migrations.applied")
+    except Exception:
+        logger.exception("migrations.failed")
+        raise
 
-    # Initialize Redis
-    redis_client = RedisClient(settings.REDIS_URL)
-    await redis_client.connect()
-    app["redis"] = redis_client
-
-    # Initialize bot
-    bot = Bot(token=settings.TELEGRAM_BOT_TOKEN)
-    app["bot"] = bot
-    app["settings"] = settings
-
-    logger.info("Bot started")
+    # Webhook registration is best-effort: a transient Telegram outage (or an
+    # invalid token during local bring-up) must not crash the pod. We log and
+    # keep serving /health; ops can re-set the webhook. Schema integrity
+    # (migrations) above stays fatal.
+    try:
+        await bot.set_webhook(
+            url=settings.WEBHOOK_URL,
+            secret_token=settings.WEBHOOK_SECRET,
+            allowed_updates=app["dp"].resolve_used_update_types(),
+            drop_pending_updates=True,
+        )
+        logger.info("bot.started")
+    except Exception:
+        logger.exception("set_webhook.failed")
 
 
 async def on_shutdown(app: web.Application) -> None:
-    """Cleanup on shutdown."""
-    if "redis" in app:
-        await app["redis"].disconnect()
-    if "bot" in app:
-        await app["bot"].session.close()
+    await cancel_all()
+    bot: Bot = app["bot"]
+    try:
+        await bot.delete_webhook()
+    except Exception:
+        logger.warning("delete_webhook.failed", exc_info=True)
+    await app["dp"].storage.close()
+    await app["redis"].disconnect()
+    await app["engine"].dispose()
+    await bot.session.close()
+    logger.info("bot.shutdown")
 
-    logger.info("Bot shutdown")
 
-
-async def main():
-    """Main bot entry point."""
+def main() -> None:
     settings = get_settings()
     configure_logging(settings)
 
-    # Create bot and dispatcher
-    bot = Bot(token=settings.TELEGRAM_BOT_TOKEN)
-    dp = Dispatcher()
+    bot = Bot(
+        token=settings.TELEGRAM_BOT_TOKEN,
+        default=DefaultBotProperties(parse_mode=None),
+    )
+    engine = create_engine()
+    session_maker = get_async_session_maker(engine)
+    redis = RedisClient(settings.REDIS_URL)
+    dp = build_dispatcher(
+        session_maker, redis, settings.OWNER_ID, settings.SETTINGS_CACHE_TTL
+    )
 
-    # Setup routers
-    dp.include_router(common.router)
-    dp.include_router(moderation.router)
-    dp.include_router(antispam.router)
-
-    # Create aiohttp app
     app = web.Application()
     app["bot"] = bot
-    app["settings"] = settings
-
-    # Setup webhook
-    SimpleRequestHandler(
-        dispatcher=dp,
-        bot=bot,
-        secret_token=settings.WEBHOOK_SECRET,
-    ).register(app, path="/webhook")
-
-    setup_application(app, dp, secret_token=settings.WEBHOOK_SECRET)
-
-    # Setup startup/shutdown
+    app["dp"] = dp
+    app["redis"] = redis
+    app["engine"] = engine
     app.on_startup.append(on_startup)
     app.on_shutdown.append(on_shutdown)
 
-    # Run server
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, settings.WEBHOOK_HOST, settings.WEBHOOK_PORT)
-    await site.start()
+    async def health(_: web.Request) -> web.Response:
+        return web.json_response({"status": "ok"})
 
-    logger.info(
-        f"Bot running on {settings.WEBHOOK_HOST}:{settings.WEBHOOK_PORT}"
-    )
+    app.router.add_get("/health", health)
 
-    # Setup graceful shutdown
-    loop = asyncio.get_event_loop()
+    SimpleRequestHandler(
+        dispatcher=dp, bot=bot, secret_token=settings.WEBHOOK_SECRET
+    ).register(app, path=settings.WEBHOOK_PATH)
+    setup_application(app, dp, bot=bot)
 
-    def handle_signal(sig):
-        logger.info(f"Received signal {sig}")
-        asyncio.create_task(runner.cleanup())
-
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, handle_signal, sig)
-
-    # Keep running
-    await asyncio.Event().wait()
+    web.run_app(app, host=settings.WEBHOOK_HOST, port=settings.WEBHOOK_PORT)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

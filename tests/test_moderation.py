@@ -1,4 +1,3 @@
-import pytest
 from datetime import datetime, timedelta
 
 from bot.services.moderation import ModerationService
@@ -34,6 +33,13 @@ class TestModerationService:
         """Test parsing invalid duration returns None."""
         assert ModerationService.parse_duration("abc") is None
         assert ModerationService.parse_duration("30x") is None
+
+    def test_parse_duration_negative_or_zero(self):
+        """Regression: negative/zero durations are rejected, not applied."""
+        assert ModerationService.parse_duration("-30m") is None
+        assert ModerationService.parse_duration("-5h") is None
+        assert ModerationService.parse_duration("0m") is None
+        assert ModerationService.parse_duration("0d") is None
 
     def test_parse_duration_case_insensitive(self):
         """Test parsing is case insensitive."""

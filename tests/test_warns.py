@@ -1,5 +1,3 @@
-import pytest
-
 from bot.services.warns import WarnsService
 
 

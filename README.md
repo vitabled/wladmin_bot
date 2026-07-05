@@ -62,8 +62,12 @@ Migrations run automatically on startup.
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
-# Install dependencies
-pip install -r requirements.txt
+# Install dependencies (runtime + test/lint tooling)
+pip install -r requirements-dev.txt
+
+# For running the app locally (outside Docker), point at your services:
+# export DATABASE_URL=postgresql+asyncpg://admin:password@localhost:5432/telegram_bot
+# export REDIS_URL=redis://localhost:6379/0
 
 # Run tests
 pytest tests/ -v
@@ -75,39 +79,56 @@ make format
 make lint
 ```
 
+Database migrations are applied automatically on bot startup (Alembic
+`upgrade head`); run them manually with `make migrate`.
+
 ## Project Structure
 
 ```
 bot/
-  __main__.py           # Webhook server entry point
-  config.py             # Settings (pydantic)
+  __main__.py           # Webhook server, middleware/router wiring, lifecycle
+  config.py             # Settings (pydantic-settings) + logging bootstrap
+  logging_conf.py       # Structured JSON logging + secret redaction + rotation
+  constants.py          # Enums/limits/defaults for settings
   db/
-    models.py           # SQLAlchemy models
-    session.py          # Database engine
+    models.py           # SQLAlchemy models (timezone-aware, indexed)
+    session.py          # Async engine + sessionmaker
+    crud.py             # Async data-access layer (repository functions)
+    migrations/         # Alembic (async env.py)
   cache/
-    redis.py            # Redis client wrapper
+    redis.py            # Redis client + settings/stopwords/captcha helpers
   i18n/
-    loader.py           # Localization manager
+    loader.py           # Localization manager (lang fallback)
     ru.json, en.json    # Translations
   filters/
-    is_admin.py         # Admin check filter
-    chat_type.py        # Chat type filters
+    is_admin.py         # Admin/owner check filter
+    chat_type.py        # Private vs group filters
+  middlewares/
+    base.py             # chat/user extraction helpers
+    database.py         # One committed session per update
+    settings.py         # Auto-register chat, load settings (cache -> DB)
+    i18n.py             # Locale resolution + `_` translator injection
+    admin.py            # is_admin/is_owner detection (Redis-cached)
   handlers/
     common.py           # /start, /help
-    moderation.py       # /ban, /kick, /warn, etc.
-    antispam.py         # Message filtering
-  services/             # Pure business logic (tested)
+    moderation.py       # /ban /unban /kick /mute /unmute /warn /unwarn /warns
+    settings_cmd.py     # /settings, /welcome, /captcha, /antispam, /addstop ...
+    captcha.py          # New-member captcha: restrict -> challenge -> verify
+    welcome.py          # Welcome messages + service-message cleanup
+    antispam.py         # Per-message link/forward/stopword filtering
+    actions.py          # Reusable moderation actions (ban/mute/kick/warn)
+  services/             # Pure business logic (unit-tested)
     antispam.py         # Spam detection
-    warns.py            # Warn system logic
+    warns.py            # Warn counting/limit logic
     captcha.py          # Captcha generation/verification
-    moderation.py       # Moderation utilities
+    moderation.py       # Duration parsing, unban-date math
   utils/
-    text.py             # Text formatting
-    telegram.py         # Safe Telegram API wrappers
-  middlewares/
-    settings.py         # Chat settings loading
+    text.py             # HTML-safe welcome/mention rendering, duration format
+    telegram.py         # Safe API wrappers (429 backoff, 400/403 handling)
+    targets.py          # Resolve moderation target (reply/mention/id/@username)
+    tasks.py            # Background task registry (captcha timeout, delayed delete)
 tests/
-  test_*.py             # Unit tests (pytest)
+  test_*.py             # Unit + handler tests (pytest)
 ```
 
 ## Commands

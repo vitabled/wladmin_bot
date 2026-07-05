@@ -1,5 +1,3 @@
-import pytest
-
 from bot.services.antispam import AntispamService
 
 
@@ -36,10 +34,7 @@ class TestAntispamService:
     def test_has_stopword_match(self):
         """Test stopword matching."""
         stopwords = ["spam", "bad", "evil"]
-        assert (
-            AntispamService.has_stopword("this is spam message", stopwords)
-            == "spam"
-        )
+        assert AntispamService.has_stopword("this is spam message", stopwords) == "spam"
 
     def test_has_stopword_case_insensitive(self):
         """Test case-insensitive stopword matching."""

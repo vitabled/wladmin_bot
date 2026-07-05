@@ -1,0 +1,5 @@
+{
+  "env": {
+    "MAIN_SKILL_VERIFY_IGNORE_GLOBS": "**/bot/**:**/tests/**"
+  }
+}

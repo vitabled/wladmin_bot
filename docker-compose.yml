@@ -1,26 +1,22 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: admin
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: telegram_bot
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${POSTGRES_USER:-admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: ${POSTGRES_DB:-telegram_bot}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U admin"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-admin} -d ${POSTGRES_DB:-telegram_bot}"]
       interval: 10s
       timeout: 5s
       retries: 5
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    # Enable AOF persistence so FSM/captcha/counters survive restarts.
+    command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis_data:/data
     healthcheck:
@@ -35,13 +31,17 @@ services:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       WEBHOOK_URL: ${WEBHOOK_URL}
       WEBHOOK_SECRET: ${WEBHOOK_SECRET}
+      WEBHOOK_HOST: 0.0.0.0
       WEBHOOK_PORT: 8000
+      WEBHOOK_PATH: ${WEBHOOK_PATH:-/webhook}
       OWNER_ID: ${OWNER_ID}
-      DATABASE_URL: postgresql+asyncpg://admin:password@postgres:5432/telegram_bot
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-telegram_bot}
       REDIS_URL: redis://redis:6379/0
-      LOG_LEVEL: info
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_FILE: ${LOG_FILE:-logs/app.log}
+      DEFAULT_LANGUAGE: ${DEFAULT_LANGUAGE:-ru}
     ports:
-      - "8000:8000"
+      - "${WEBHOOK_PORT:-8000}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -50,10 +50,11 @@ services:
     volumes:
       - ./logs:/app/logs
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 20s
 
 volumes:
   postgres_data:

@@ -1,15 +1,23 @@
+"""SQLAlchemy models (multi-tenant chat administration).
+
+Настройки-энумы хранятся строками (расширяемость последующих фаз без
+миграций типов). Все временные метки — timezone-aware, server_default=now().
+"""
+
+from __future__ import annotations
+
 from datetime import datetime
-from enum import Enum as PyEnum
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
     DateTime,
-    Enum,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -22,24 +30,32 @@ class Base(DeclarativeBase):
 class Chat(Base):
     __tablename__ = "chats"
 
-    chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    # Telegram-assigned id — provided explicitly, never auto-incremented.
+    chat_id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, autoincrement=False
+    )
     title: Mapped[str] = mapped_column(String(255))
     type: Mapped[str] = mapped_column(String(50))
     language: Mapped[str] = mapped_column(String(10), default="ru")
-    added_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    added_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
-    settings: Mapped["ChatSettings"] = relationship(
-        "ChatSettings", back_populates="chat", uselist=False, cascade="all, delete-orphan"
+    settings: Mapped[ChatSettings] = relationship(
+        back_populates="chat",
+        uselist=False,
+        cascade="all, delete-orphan",
+        lazy="selectin",
     )
-    warns: Mapped[list["Warn"]] = relationship(
-        "Warn", back_populates="chat", cascade="all, delete-orphan"
+    warns: Mapped[list[Warn]] = relationship(
+        back_populates="chat", cascade="all, delete-orphan"
     )
-    stopwords: Mapped[list["Stopword"]] = relationship(
-        "Stopword", back_populates="chat", cascade="all, delete-orphan"
+    stopwords: Mapped[list[Stopword]] = relationship(
+        back_populates="chat", cascade="all, delete-orphan"
     )
-    mod_logs: Mapped[list["ModLog"]] = relationship(
-        "ModLog", back_populates="chat", cascade="all, delete-orphan"
+    mod_logs: Mapped[list[ModLog]] = relationship(
+        back_populates="chat", cascade="all, delete-orphan"
     )
 
 
@@ -47,78 +63,107 @@ class ChatSettings(Base):
     __tablename__ = "chat_settings"
 
     chat_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("chats.chat_id"), primary_key=True
+        BigInteger,
+        ForeignKey("chats.chat_id", ondelete="CASCADE"),
+        primary_key=True,
     )
 
+    # Welcome
     welcome_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     welcome_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     delete_service_messages: Mapped[bool] = mapped_column(Boolean, default=True)
     delete_welcome_after: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # Captcha
     captcha_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     captcha_type: Mapped[str] = mapped_column(String(20), default="button")
     captcha_timeout: Mapped[int] = mapped_column(Integer, default=300)
     captcha_fail_action: Mapped[str] = mapped_column(String(20), default="kick")
 
+    # Warns
     warn_limit: Mapped[int] = mapped_column(Integer, default=3)
     warn_action: Mapped[str] = mapped_column(String(20), default="mute")
     warn_action_duration: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # Antispam
     filter_links: Mapped[bool] = mapped_column(Boolean, default=False)
     filter_forwards: Mapped[bool] = mapped_column(Boolean, default=False)
     filter_stopwords: Mapped[bool] = mapped_column(Boolean, default=False)
     antispam_action: Mapped[str] = mapped_column(String(20), default="delete")
     antispam_exempt_admins: Mapped[bool] = mapped_column(Boolean, default=True)
 
-    chat: Mapped[Chat] = relationship("Chat", back_populates="settings")
+    chat: Mapped[Chat] = relationship(back_populates="settings")
 
 
 class User(Base):
     __tablename__ = "users"
 
-    user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, autoincrement=False
+    )
     first_name: Mapped[str] = mapped_column(String(255))
     username: Mapped[str | None] = mapped_column(String(255), nullable=True)
     last_seen: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
     )
 
 
 class Warn(Base):
     __tablename__ = "warns"
+    __table_args__ = (
+        Index("ix_warns_chat_user_active", "chat_id", "user_id", "is_active"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    chat_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("chats.chat_id"))
+    chat_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("chats.chat_id", ondelete="CASCADE")
+    )
     user_id: Mapped[int] = mapped_column(BigInteger)
     admin_id: Mapped[int] = mapped_column(BigInteger)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
-    chat: Mapped[Chat] = relationship("Chat", back_populates="warns")
+    chat: Mapped[Chat] = relationship(back_populates="warns")
 
 
 class Stopword(Base):
     __tablename__ = "stopwords"
+    __table_args__ = (
+        UniqueConstraint("chat_id", "word", name="uq_stopwords_chat_word"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    chat_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("chats.chat_id"))
+    chat_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("chats.chat_id", ondelete="CASCADE")
+    )
     word: Mapped[str] = mapped_column(String(255))
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
-    chat: Mapped[Chat] = relationship("Chat", back_populates="stopwords")
+    chat: Mapped[Chat] = relationship(back_populates="stopwords")
 
 
 class ModLog(Base):
     __tablename__ = "mod_log"
+    __table_args__ = (Index("ix_mod_log_chat_created", "chat_id", "created_at"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    chat_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("chats.chat_id"))
+    chat_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("chats.chat_id", ondelete="CASCADE")
+    )
     actor_id: Mapped[int] = mapped_column(BigInteger)
-    target_id: Mapped[int] = mapped_column(BigInteger, nullable=True)
+    target_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     action: Mapped[str] = mapped_column(String(50))
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     duration: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
-    chat: Mapped[Chat] = relationship("Chat", back_populates="mod_logs")
+    chat: Mapped[Chat] = relationship(back_populates="mod_logs")

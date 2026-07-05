@@ -1,0 +1,25 @@
+# Local development override. Copy to docker-compose.override.yml to activate
+# (docker compose merges it automatically).
+#
+#   cp docker-compose.override.yml.example docker-compose.override.yml
+#
+# Live-mounts the source for quick iteration and turns on debug logging.
+# Note: webhook mode still needs a public HTTPS URL (e.g. an ngrok tunnel)
+# pointed at WEBHOOK_URL for Telegram to deliver updates.
+
+services:
+  bot:
+    environment:
+      LOG_LEVEL: debug
+    volumes:
+      - ./bot:/app/bot
+      - ./alembic.ini:/app/alembic.ini
+      - ./logs:/app/logs
+
+  postgres:
+    ports:
+      - "5432:5432"
+
+  redis:
+    ports:
+      - "6379:6379"

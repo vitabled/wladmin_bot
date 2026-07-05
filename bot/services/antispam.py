@@ -1,6 +1,4 @@
 import re
-from typing import Optional
-from urllib.parse import urlparse
 
 
 class AntispamService:
@@ -16,7 +14,7 @@ class AntispamService:
         return bool(re.search(url_pattern, text))
 
     @staticmethod
-    def has_forward(forward_origin) -> bool:
+    def has_forward(forward_origin: object | None) -> bool:
         """Check if message is forwarded."""
         return forward_origin is not None
 
@@ -34,12 +32,10 @@ class AntispamService:
 
         Returns mapping of normalized -> original for first match tracking.
         """
-        return {
-            AntispamService._normalize_text(word): word for word in stopwords
-        }
+        return {AntispamService._normalize_text(word): word for word in stopwords}
 
     @staticmethod
-    def has_stopword(text: str, stopwords: list[str]) -> Optional[str]:
+    def has_stopword(text: str, stopwords: list[str]) -> str | None:
         """Check if text contains any stopword, return first match."""
         if not text or not stopwords:
             return None
@@ -58,12 +54,12 @@ class AntispamService:
     def check_message(
         cls,
         text: str,
-        forward_origin: Optional[object] = None,
-        stopwords: Optional[list[str]] = None,
+        forward_origin: object | None = None,
+        stopwords: list[str] | None = None,
         filter_links: bool = False,
         filter_forwards: bool = False,
         filter_stopwords: bool = False,
-    ) -> tuple[bool, Optional[str]]:
+    ) -> tuple[bool, str | None]:
         """
         Check message against enabled filters.
 

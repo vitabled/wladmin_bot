@@ -1,6 +1,4 @@
-import pytest
-
-from bot.services.captcha import CaptchaService, CaptchaType, MathCaptcha
+from bot.services.captcha import CaptchaService, MathCaptcha
 
 
 class TestMathCaptcha:
@@ -37,6 +35,22 @@ class TestMathCaptcha:
         options = captcha.options()
         assert len(set(options)) == 4
 
+    def test_math_captcha_options_negative_answer(self):
+        """Regression: negative/zero answers must not crash options()."""
+        for ans in (-6, 0, 1):
+            captcha = MathCaptcha(4, 10, "-", ans)
+            options = captcha.options()
+            assert len(options) == 4
+            assert len(set(options)) == 4
+            assert ans in options
+
+    def test_generate_math_captcha_non_negative(self):
+        """Regression: generated subtraction captchas stay non-negative."""
+        for _ in range(200):
+            captcha = CaptchaService.generate_math_captcha()
+            assert captcha.answer >= 0
+            assert len(set(captcha.options())) == 4
+
 
 class TestCaptchaService:
     """Tests for captcha service logic."""
@@ -61,9 +75,7 @@ class TestCaptchaService:
 
     def test_verify_button_captcha_mismatch(self):
         """Test button captcha verification - wrong user."""
-        assert not CaptchaService.verify_button_captcha(
-            user_id=123, target_user_id=456
-        )
+        assert not CaptchaService.verify_button_captcha(user_id=123, target_user_id=456)
 
     def test_verify_math_captcha_correct(self):
         """Test math captcha verification - correct answer."""

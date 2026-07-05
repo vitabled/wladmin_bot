@@ -1,12 +1,12 @@
-import random
 import secrets
-import string
 from dataclasses import dataclass
-from enum import Enum
-from typing import Optional
+from enum import StrEnum
+
+# Cryptographically-strong RNG (predictable captcha would be trivially bypassed).
+_rng = secrets.SystemRandom()
 
 
-class CaptchaType(str, Enum):
+class CaptchaType(StrEnum):
     BUTTON = "button"
     MATH = "math"
     EMOJI = "emoji"
@@ -26,17 +26,24 @@ class MathCaptcha:
         return f"{self.num1} {self.operation} {self.num2} = ?"
 
     def options(self) -> list[int]:
-        """Get answer options (correct + 3 wrong)."""
-        wrong_answers = set()
-        while len(wrong_answers) < 3:
-            wrong = random.randint(
-                max(0, self.answer - 5), self.answer + 5
-            )
-            if wrong != self.answer:
-                wrong_answers.add(wrong)
+        """Get 4 shuffled answer options (correct + 3 unique wrong).
 
-        options = [self.answer] + list(wrong_answers)
-        random.shuffle(options)
+        Robust to negative/zero/large answers: distractors are built from
+        symmetric offsets around the answer, widening until 3 unique values
+        distinct from the answer are found.
+        """
+        wrong_answers: set[int] = set()
+        offset = 1
+        while len(wrong_answers) < 3:
+            for candidate in (self.answer - offset, self.answer + offset):
+                if candidate != self.answer:
+                    wrong_answers.add(candidate)
+                if len(wrong_answers) >= 3:
+                    break
+            offset += 1
+
+        options = [self.answer, *list(wrong_answers)[:3]]
+        _rng.shuffle(options)
         return options
 
 
@@ -56,14 +63,17 @@ class CaptchaService:
 
     @staticmethod
     def generate_math_captcha() -> MathCaptcha:
-        """Generate a simple math captcha."""
-        num1 = secrets.randbelow(20) + 1
-        num2 = secrets.randbelow(20) + 1
-        operation = secrets.choice(["+", "-", "*"])
+        """Generate a simple math captcha with a non-negative answer."""
+        num1 = _rng.randint(1, 20)
+        num2 = _rng.randint(1, 20)
+        operation = _rng.choice(["+", "-", "*"])
 
         if operation == "+":
             answer = num1 + num2
         elif operation == "-":
+            # Keep the answer non-negative for a friendlier prompt.
+            if num2 > num1:
+                num1, num2 = num2, num1
             answer = num1 - num2
         else:
             answer = num1 * num2
@@ -73,13 +83,11 @@ class CaptchaService:
     @staticmethod
     def generate_emoji_captcha() -> tuple[str, list[str]]:
         """Generate emoji captcha: correct emoji + 3 wrong options."""
-        correct = secrets.choice(CaptchaService.EMOJI_SET)
-        wrong = secrets.SystemRandom().sample(
-            [e for e in CaptchaService.EMOJI_SET if e != correct], 3
-        )
+        correct = _rng.choice(CaptchaService.EMOJI_SET)
+        wrong = _rng.sample([e for e in CaptchaService.EMOJI_SET if e != correct], 3)
 
-        options = [correct] + wrong
-        secrets.SystemRandom().shuffle(options)
+        options = [correct, *wrong]
+        _rng.shuffle(options)
         return correct, options
 
     @staticmethod
@@ -88,9 +96,7 @@ class CaptchaService:
         return user_id == target_user_id
 
     @staticmethod
-    def verify_math_captcha(
-        user_answer: str, correct_answer: int
-    ) -> bool:
+    def verify_math_captcha(user_answer: str, correct_answer: int) -> bool:
         """Verify math captcha answer."""
         try:
             return int(user_answer) == correct_answer
