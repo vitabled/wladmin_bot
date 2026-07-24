@@ -89,6 +89,10 @@ TRIGGER_REPLY_MAX: Final = 4096
 # Separator between pattern and reply in /addtrigger.
 TRIGGER_SEPARATOR: Final = "|"
 
+# --- Statistics (Phase 4) -----------------------------------------------
+TOP_DEFAULT: Final = 10
+TOP_MAX: Final = 25
+
 # --- Default welcome text placeholders ----------------------------------
 DEFAULT_WELCOME_TEXT: Final = "{mention}, добро пожаловать в {chat_title}!"
 

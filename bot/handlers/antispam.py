@@ -12,7 +12,7 @@ from bot.cache.redis import RedisClient
 from bot.constants import ACTION_BAN, ACTION_MUTE, ACTION_WARN
 from bot.db import crud
 from bot.filters.chat_type import IsGroup
-from bot.handlers import actions, antiflood, triggers
+from bot.handlers import actions, antiflood, stats, triggers
 from bot.services.antispam import AntispamService
 from bot.utils.telegram import safe_delete_message
 
@@ -129,8 +129,9 @@ async def on_message(message: types.Message, **data: Any) -> None:
         if await antiflood.enforce_flood(message, data):
             return
     acted = await _process(message, data)
-    # Auto-reply to triggers only when the message survived moderation.
+    # Count activity + auto-reply only when the message survived moderation.
     if not acted:
+        await stats.record_activity(message, data)
         await triggers.maybe_reply(message, data)
 
 

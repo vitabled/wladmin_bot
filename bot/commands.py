@@ -35,6 +35,8 @@ _ADMIN: list[tuple[str, dict[str, str]]] = [
     ("warn", {"en": "Warn a user", "ru": "Предупредить"}),
     ("unwarn", {"en": "Remove last warn", "ru": "Снять предупреждение"}),
     ("warns", {"en": "Show warnings", "ru": "Показать предупреждения"}),
+    ("stats", {"en": "My activity stats", "ru": "Моя статистика"}),
+    ("top", {"en": "Most active users", "ru": "Самые активные"}),
     ("welcome", {"en": "Toggle welcome", "ru": "Приветствие вкл/выкл"}),
     ("captcha", {"en": "Toggle captcha", "ru": "Капча вкл/выкл"}),
     ("antispam", {"en": "Configure antispam", "ru": "Настроить антиспам"}),

@@ -18,7 +18,16 @@ from bot.constants import (
     TRIGGER_PATTERN_MAX,
     TRIGGER_REPLY_MAX,
 )
-from bot.db.models import Chat, ChatSettings, ModLog, Stopword, Trigger, User, Warn
+from bot.db.models import (
+    Activity,
+    Chat,
+    ChatSettings,
+    ModLog,
+    Stopword,
+    Trigger,
+    User,
+    Warn,
+)
 
 _INT32_MOD = 2_147_483_647
 
@@ -49,6 +58,7 @@ _SETTINGS_FIELDS = frozenset(
         "newbie_media_enabled",
         "newbie_period",
         "triggers_enabled",
+        "stats_enabled",
     }
 )
 
@@ -131,6 +141,18 @@ async def get_user_by_username(session: AsyncSession, username: str) -> User | N
         select(User).where(func.lower(User.username) == normalized).limit(1)
     )
     return result.scalar_one_or_none()
+
+
+async def get_users_by_ids(
+    session: AsyncSession, user_ids: list[int]
+) -> dict[int, str]:
+    """Map user_id -> first_name for the given ids (cached users only)."""
+    if not user_ids:
+        return {}
+    result = await session.execute(
+        select(User.user_id, User.first_name).where(User.user_id.in_(user_ids))
+    )
+    return {int(uid): name for uid, name in result.all()}
 
 
 async def upsert_user(
@@ -354,6 +376,63 @@ async def count_triggers(session: AsyncSession, chat_id: int) -> int:
         select(func.count()).select_from(Trigger).where(Trigger.chat_id == chat_id)
     )
     return int(result.scalar_one())
+
+
+# --------------------------------------------------------------------------- #
+# Activity statistics (Phase 4)
+# --------------------------------------------------------------------------- #
+async def bump_activity(session: AsyncSession, chat_id: int, user_id: int) -> None:
+    """Increment a user's message counter for a chat (upsert)."""
+    stmt = (
+        pg_insert(Activity)
+        .values(chat_id=chat_id, user_id=user_id, message_count=1)
+        .on_conflict_do_update(
+            index_elements=[Activity.chat_id, Activity.user_id],
+            set_={
+                "message_count": Activity.message_count + 1,
+                "last_active_at": func.now(),
+            },
+        )
+    )
+    await session.execute(stmt)
+
+
+async def get_activity(session: AsyncSession, chat_id: int, user_id: int) -> int:
+    """Return a user's message count in a chat (0 if none)."""
+    result = await session.execute(
+        select(Activity.message_count).where(
+            Activity.chat_id == chat_id, Activity.user_id == user_id
+        )
+    )
+    value = result.scalar_one_or_none()
+    return int(value) if value is not None else 0
+
+
+async def top_active(
+    session: AsyncSession, chat_id: int, limit: int
+) -> list[tuple[int, int]]:
+    """Return the most active users as ``(user_id, message_count)`` pairs."""
+    result = await session.execute(
+        select(Activity.user_id, Activity.message_count)
+        .where(Activity.chat_id == chat_id)
+        .order_by(Activity.message_count.desc(), Activity.user_id)
+        .limit(limit)
+    )
+    return [(int(uid), int(cnt)) for uid, cnt in result.all()]
+
+
+async def chat_activity_totals(session: AsyncSession, chat_id: int) -> tuple[int, int]:
+    """Return ``(total_messages, tracked_users)`` for a chat."""
+    result = await session.execute(
+        select(
+            func.coalesce(func.sum(Activity.message_count), 0),
+            func.count(),
+        )
+        .select_from(Activity)
+        .where(Activity.chat_id == chat_id)
+    )
+    total, users = result.one()
+    return int(total), int(users)
 
 
 # --------------------------------------------------------------------------- #

@@ -108,6 +108,9 @@ class ChatSettings(Base):
     # Triggers / auto-replies (Phase 3)
     triggers_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # Statistics (Phase 4)
+    stats_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
     chat: Mapped[Chat] = relationship(back_populates="settings")
 
 
@@ -183,6 +186,24 @@ class Trigger(Base):
     )
 
     chat: Mapped[Chat] = relationship(back_populates="triggers")
+
+
+class Activity(Base):
+    """Per-user message activity within a chat (Phase 4)."""
+
+    __tablename__ = "activity"
+    __table_args__ = (Index("ix_activity_chat_count", "chat_id", "message_count"),)
+
+    chat_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("chats.chat_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    message_count: Mapped[int] = mapped_column(BigInteger, default=0)
+    last_active_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
 
 class ModLog(Base):

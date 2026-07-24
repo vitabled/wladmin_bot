@@ -21,6 +21,7 @@ from bot.handlers import (
     common,
     moderation,
     settings_cmd,
+    stats,
     welcome,
 )
 from bot.i18n.loader import get_i18n
@@ -61,6 +62,7 @@ def build_dispatcher(
     dp.include_router(common.router)
     dp.include_router(settings_cmd.router)
     dp.include_router(moderation.router)
+    dp.include_router(stats.router)
     dp.include_router(captcha.router)
     dp.include_router(welcome.router)
     dp.include_router(antispam.router)

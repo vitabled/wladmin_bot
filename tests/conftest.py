@@ -50,6 +50,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "newbie_media_enabled": False,
     "newbie_period": 3600,
     "triggers_enabled": False,
+    "stats_enabled": True,
 }
 
 BOT_ID = 42

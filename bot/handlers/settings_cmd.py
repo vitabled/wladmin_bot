@@ -96,6 +96,7 @@ async def cmd_settings(
         newbie_media=onoff(s.get("newbie_media_enabled")),
         newbie_period=s.get("newbie_period", 3600),
         triggers_enabled=onoff(s.get("triggers_enabled")),
+        stats_enabled=onoff(s.get("stats_enabled", True)),
     )
     await message.reply(text)
 
