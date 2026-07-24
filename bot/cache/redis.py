@@ -136,6 +136,26 @@ class RedisClient:
         """Drop cached stopwords after a change."""
         await self.delete(self._stopwords_key(chat_id))
 
+    # --- Domain helpers: triggers cache (Phase 3) -------------------------
+    @staticmethod
+    def _triggers_key(chat_id: int) -> str:
+        return f"triggers:{chat_id}"
+
+    async def cache_triggers(
+        self, chat_id: int, triggers: list, ttl: int = 3600
+    ) -> None:
+        """Cache a chat's trigger list (list of dicts) with TTL."""
+        await self.set(self._triggers_key(chat_id), triggers, ttl=ttl)
+
+    async def get_cached_triggers(self, chat_id: int) -> list | None:
+        """Return cached triggers or None on miss."""
+        value = await self.get_json(self._triggers_key(chat_id))
+        return value if isinstance(value, list) else None
+
+    async def invalidate_triggers(self, chat_id: int) -> None:
+        """Drop cached triggers after a change."""
+        await self.delete(self._triggers_key(chat_id))
+
     # --- Domain helpers: pending captcha ----------------------------------
     @staticmethod
     def _captcha_key(chat_id: int, user_id: int) -> str:

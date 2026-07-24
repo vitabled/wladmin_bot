@@ -76,6 +76,19 @@ NEWBIE_RESTRICTED_CONTENT: Final = frozenset(
     }
 )
 
+# --- Triggers / auto-replies (Phase 3) ----------------------------------
+TRIGGER_CONTAINS: Final = "contains"
+TRIGGER_EXACT: Final = "exact"
+TRIGGER_STARTS: Final = "starts"
+TRIGGER_MATCH_TYPES: Final = frozenset(
+    {TRIGGER_CONTAINS, TRIGGER_EXACT, TRIGGER_STARTS}
+)
+TRIGGER_MAX_PER_CHAT: Final = 100
+TRIGGER_PATTERN_MAX: Final = 255
+TRIGGER_REPLY_MAX: Final = 4096
+# Separator between pattern and reply in /addtrigger.
+TRIGGER_SEPARATOR: Final = "|"
+
 # --- Default welcome text placeholders ----------------------------------
 DEFAULT_WELCOME_TEXT: Final = "{mention}, добро пожаловать в {chat_title}!"
 

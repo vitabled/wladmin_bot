@@ -12,7 +12,7 @@ from bot.cache.redis import RedisClient
 from bot.constants import ACTION_BAN, ACTION_MUTE, ACTION_WARN
 from bot.db import crud
 from bot.filters.chat_type import IsGroup
-from bot.handlers import actions, antiflood
+from bot.handlers import actions, antiflood, triggers
 from bot.services.antispam import AntispamService
 from bot.utils.telegram import safe_delete_message
 
@@ -22,24 +22,25 @@ router = Router()
 router.message.filter(IsGroup())
 
 
-async def _process(message: types.Message, data: dict[str, Any]) -> None:
+async def _process(message: types.Message, data: dict[str, Any]) -> bool:
+    """Run antispam filters. Returns True if the message was removed/acted on."""
     settings = data.get("settings")
     if not settings:
-        return
+        return False
 
     # Don't moderate channel posts / anonymous admins / linked-channel
     # auto-forwards as spam.
     if message.sender_chat is not None or message.is_automatic_forward:
-        return
+        return False
 
     if not (
         settings["filter_links"]
         or settings["filter_forwards"]
         or settings["filter_stopwords"]
     ):
-        return
+        return False
     if settings.get("antispam_exempt_admins", True) and data.get("is_admin"):
-        return
+        return False
 
     bot: Bot = message.bot
     chat = message.chat
@@ -65,11 +66,11 @@ async def _process(message: types.Message, data: dict[str, Any]) -> None:
         filter_stopwords=settings["filter_stopwords"],
     )
     if not is_spam or reason is None:
-        return
+        return False
 
     await safe_delete_message(bot, chat.id, message.message_id)
     if user is None:
-        return
+        return True
 
     reason_kind = reason.split(":", 1)[0]
     await crud.add_mod_log(
@@ -108,6 +109,7 @@ async def _process(message: types.Message, data: dict[str, Any]) -> None:
             f"antispam:{reason_kind}",
         )
     # action == "delete": message already removed above.
+    return True
 
 
 def _guards_applicable(message: types.Message, data: dict[str, Any]) -> bool:
@@ -126,7 +128,10 @@ async def on_message(message: types.Message, **data: Any) -> None:
             return
         if await antiflood.enforce_flood(message, data):
             return
-    await _process(message, data)
+    acted = await _process(message, data)
+    # Auto-reply to triggers only when the message survived moderation.
+    if not acted:
+        await triggers.maybe_reply(message, data)
 
 
 @router.edited_message()

@@ -1,7 +1,7 @@
 {
   "cmd_start": "👋 Hi! I'm a group administration bot for Telegram.\n\nAdd me to a group and grant admin rights. Features:\n• Moderation: /ban /kick /mute /warn\n• Captcha for new members\n• Antispam: links, forwards, stopwords\n• Customizable welcome messages\n\n/help — command list.",
   "cmd_help_private": "📚 Commands:\n/start — welcome\n/help — this help\n\nAdd me to a group and use /help there to see moderation commands (admins only).",
-  "cmd_help_group": "📚 Moderation commands (admins only):\n\n/ban [duration] [reason] — ban\n/unban — unban\n/kick — remove without ban\n/mute [duration] [reason] — mute\n/unmute — unmute\n/warn [reason] — warn\n/unwarn — remove last warning\n/warns — show warnings\n\n⚙️ Settings:\n/settings — current settings\n/welcome on|off, /setwelcome <text>\n/captcha on|off, /setcaptcha button|math|emoji\n/setwarnlimit <N>, /setwarnaction mute|kick|ban [duration]\n/antispam links|forwards|stopwords on|off\n/antiflood on|off | <limit> <window> [mute|kick|ban]\n/newbie on|off | <seconds>\n/addstop <word>, /delstop <word>, /stopwords",
+  "cmd_help_group": "📚 Moderation commands (admins only):\n\n/ban [duration] [reason] — ban\n/unban — unban\n/kick — remove without ban\n/mute [duration] [reason] — mute\n/unmute — unmute\n/warn [reason] — warn\n/unwarn — remove last warning\n/warns — show warnings\n\n⚙️ Settings:\n/settings — current settings\n/welcome on|off, /setwelcome <text>\n/captcha on|off, /setcaptcha button|math|emoji\n/setwarnlimit <N>, /setwarnaction mute|kick|ban [duration]\n/antispam links|forwards|stopwords on|off\n/antiflood on|off | <limit> <window> [mute|kick|ban]\n/newbie on|off | <seconds>\n/addstop <word>, /delstop <word>, /stopwords\n/addtrigger <phrase> | <reply>, /deltrigger <phrase>, /triggers [on|off]",
   "error_not_admin": "❌ Only administrators can use this command.",
   "error_bot_not_admin": "❌ I'm not an admin in this chat or I lack permissions.",
   "error_bot_cant_restrict": "❌ I don't have the right to restrict members.",
@@ -47,7 +47,7 @@
   "captcha_timeout_ban": "⏱️ {user} failed the check and was banned.",
   "captcha_timeout_mute": "⏱️ {user} failed the check and stays muted.",
   "welcome_default": "{mention}, welcome to {chat_title}!",
-  "settings_text": "⚙️ Chat settings:\n\n👋 Welcome: {welcome_enabled}\n🧩 Captcha: {captcha_enabled} (type: {captcha_type}, timeout: {captcha_timeout}s, on fail: {captcha_fail_action})\n⚠️ Warn limit: {warn_limit} → {warn_action}\n🚫 Antispam: links {filter_links} | forwards {filter_forwards} | stopwords {filter_stopwords} → {antispam_action}\n🌊 Anti-flood: {antiflood_enabled} ({antiflood_limit} msg/{antiflood_window}s → {antiflood_action})\n🆕 Newbie media: {newbie_media} (window: {newbie_period}s)",
+  "settings_text": "⚙️ Chat settings:\n\n👋 Welcome: {welcome_enabled}\n🧩 Captcha: {captcha_enabled} (type: {captcha_type}, timeout: {captcha_timeout}s, on fail: {captcha_fail_action})\n⚠️ Warn limit: {warn_limit} → {warn_action}\n🚫 Antispam: links {filter_links} | forwards {filter_forwards} | stopwords {filter_stopwords} → {antispam_action}\n🌊 Anti-flood: {antiflood_enabled} ({antiflood_limit} msg/{antiflood_window}s → {antiflood_action})\n🆕 Newbie media: {newbie_media} (window: {newbie_period}s)\n💬 Triggers/auto-replies: {triggers_enabled}",
   "value_on": "on",
   "value_off": "off",
   "ok_saved": "✅ Saved.",
@@ -78,5 +78,14 @@
   "stopword_not_found": "ℹ️ No such stopword.",
   "stopword_empty": "❌ Provide a word: /addstop <word>.",
   "stopwords_list": "📝 Stopwords ({count}):\n{words}",
-  "stopwords_empty": "📝 Stopword list is empty."
+  "stopwords_empty": "📝 Stopword list is empty.",
+  "feature_triggers": "Triggers/auto-replies",
+  "trigger_usage": "❌ Usage: /addtrigger <phrase> | <reply>. Example: /addtrigger hello | Hi, {mention}!",
+  "trigger_added": "✅ Trigger added: “{pattern}”.",
+  "trigger_exists": "ℹ️ Trigger “{pattern}” already exists.",
+  "trigger_removed": "✅ Trigger removed: “{pattern}”.",
+  "trigger_not_found": "ℹ️ No trigger “{pattern}”.",
+  "trigger_limit": "❌ Trigger limit reached ({max}).",
+  "triggers_list": "💬 Triggers ({count}):\n{triggers}",
+  "triggers_empty": "💬 Trigger list is empty."
 }

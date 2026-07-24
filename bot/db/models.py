@@ -54,6 +54,9 @@ class Chat(Base):
     stopwords: Mapped[list[Stopword]] = relationship(
         back_populates="chat", cascade="all, delete-orphan"
     )
+    triggers: Mapped[list[Trigger]] = relationship(
+        back_populates="chat", cascade="all, delete-orphan"
+    )
     mod_logs: Mapped[list[ModLog]] = relationship(
         back_populates="chat", cascade="all, delete-orphan"
     )
@@ -101,6 +104,9 @@ class ChatSettings(Base):
     # Newbie media restriction (Phase 2)
     newbie_media_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     newbie_period: Mapped[int] = mapped_column(Integer, default=3600)
+
+    # Triggers / auto-replies (Phase 3)
+    triggers_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
 
     chat: Mapped[Chat] = relationship(back_populates="settings")
 
@@ -157,6 +163,26 @@ class Stopword(Base):
     )
 
     chat: Mapped[Chat] = relationship(back_populates="stopwords")
+
+
+class Trigger(Base):
+    __tablename__ = "triggers"
+    __table_args__ = (
+        UniqueConstraint("chat_id", "pattern", name="uq_triggers_chat_pattern"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    chat_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("chats.chat_id", ondelete="CASCADE")
+    )
+    pattern: Mapped[str] = mapped_column(String(255))
+    match_type: Mapped[str] = mapped_column(String(20), default="contains")
+    reply_text: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    chat: Mapped[Chat] = relationship(back_populates="triggers")
 
 
 class ModLog(Base):

@@ -49,6 +49,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "antiflood_action": "mute",
     "newbie_media_enabled": False,
     "newbie_period": 3600,
+    "triggers_enabled": False,
 }
 
 BOT_ID = 42

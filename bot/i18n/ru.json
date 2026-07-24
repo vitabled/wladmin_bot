@@ -1,7 +1,7 @@
 {
   "cmd_start": "👋 Привет! Я бот-администратор для Telegram-групп.\n\nДобавьте меня в группу и дайте права администратора. Возможности:\n• Модерация: /ban /kick /mute /warn\n• Капча для новых участников\n• Антиспам: ссылки, пересланные, стоп-слова\n• Настраиваемые приветствия\n\n/help — список команд.",
   "cmd_help_private": "📚 Команды:\n/start — приветствие\n/help — эта справка\n\nДобавьте меня в группу и используйте /help там, чтобы увидеть команды модерации (доступны админам).",
-  "cmd_help_group": "📚 Команды модерации (только для админов):\n\n/ban [срок] [причина] — забанить\n/unban — разбанить\n/kick — выгнать без бана\n/mute [срок] [причина] — замутить\n/unmute — размутить\n/warn [причина] — предупреждение\n/unwarn — снять последнее предупреждение\n/warns — показать предупреждения\n\n⚙️ Настройки:\n/settings — текущие настройки\n/welcome on|off, /setwelcome <текст>\n/captcha on|off, /setcaptcha button|math|emoji\n/setwarnlimit <N>, /setwarnaction mute|kick|ban [срок]\n/antispam links|forwards|stopwords on|off\n/antiflood on|off | <лимит> <окно> [mute|kick|ban]\n/newbie on|off | <секунды>\n/addstop <слово>, /delstop <слово>, /stopwords",
+  "cmd_help_group": "📚 Команды модерации (только для админов):\n\n/ban [срок] [причина] — забанить\n/unban — разбанить\n/kick — выгнать без бана\n/mute [срок] [причина] — замутить\n/unmute — размутить\n/warn [причина] — предупреждение\n/unwarn — снять последнее предупреждение\n/warns — показать предупреждения\n\n⚙️ Настройки:\n/settings — текущие настройки\n/welcome on|off, /setwelcome <текст>\n/captcha on|off, /setcaptcha button|math|emoji\n/setwarnlimit <N>, /setwarnaction mute|kick|ban [срок]\n/antispam links|forwards|stopwords on|off\n/antiflood on|off | <лимит> <окно> [mute|kick|ban]\n/newbie on|off | <секунды>\n/addstop <слово>, /delstop <слово>, /stopwords\n/addtrigger <фраза> | <ответ>, /deltrigger <фраза>, /triggers [on|off]",
   "error_not_admin": "❌ Эту команду могут использовать только администраторы.",
   "error_bot_not_admin": "❌ Я не администратор в этом чате или мне не хватает прав.",
   "error_bot_cant_restrict": "❌ У меня нет права ограничивать участников.",
@@ -47,7 +47,7 @@
   "captcha_timeout_ban": "⏱️ {user} не прошёл проверку и был забанен.",
   "captcha_timeout_mute": "⏱️ {user} не прошёл проверку и остаётся без права писать.",
   "welcome_default": "{mention}, добро пожаловать в {chat_title}!",
-  "settings_text": "⚙️ Настройки чата:\n\n👋 Приветствие: {welcome_enabled}\n🧩 Капча: {captcha_enabled} (тип: {captcha_type}, таймаут: {captcha_timeout}с, при провале: {captcha_fail_action})\n⚠️ Лимит предупреждений: {warn_limit} → {warn_action}\n🚫 Антиспам: ссылки {filter_links} | пересланные {filter_forwards} | стоп-слова {filter_stopwords} → {antispam_action}\n🌊 Антифлуд: {antiflood_enabled} ({antiflood_limit} сообщ./{antiflood_window}с → {antiflood_action})\n🆕 Медиа новичков: {newbie_media} (период: {newbie_period}с)",
+  "settings_text": "⚙️ Настройки чата:\n\n👋 Приветствие: {welcome_enabled}\n🧩 Капча: {captcha_enabled} (тип: {captcha_type}, таймаут: {captcha_timeout}с, при провале: {captcha_fail_action})\n⚠️ Лимит предупреждений: {warn_limit} → {warn_action}\n🚫 Антиспам: ссылки {filter_links} | пересланные {filter_forwards} | стоп-слова {filter_stopwords} → {antispam_action}\n🌊 Антифлуд: {antiflood_enabled} ({antiflood_limit} сообщ./{antiflood_window}с → {antiflood_action})\n🆕 Медиа новичков: {newbie_media} (период: {newbie_period}с)\n💬 Триггеры/автоответы: {triggers_enabled}",
   "value_on": "вкл",
   "value_off": "выкл",
   "ok_saved": "✅ Сохранено.",
@@ -78,5 +78,14 @@
   "stopword_not_found": "ℹ️ Такого стоп-слова нет.",
   "stopword_empty": "❌ Укажите слово: /addstop <слово>.",
   "stopwords_list": "📝 Стоп-слова ({count}):\n{words}",
-  "stopwords_empty": "📝 Список стоп-слов пуст."
+  "stopwords_empty": "📝 Список стоп-слов пуст.",
+  "feature_triggers": "Триггеры/автоответы",
+  "trigger_usage": "❌ Использование: /addtrigger <фраза> | <ответ>. Пример: /addtrigger привет | Привет, {mention}!",
+  "trigger_added": "✅ Триггер добавлен: «{pattern}».",
+  "trigger_exists": "ℹ️ Триггер «{pattern}» уже есть.",
+  "trigger_removed": "✅ Триггер удалён: «{pattern}».",
+  "trigger_not_found": "ℹ️ Триггера «{pattern}» нет.",
+  "trigger_limit": "❌ Достигнут лимит триггеров ({max}).",
+  "triggers_list": "💬 Триггеры ({count}):\n{triggers}",
+  "triggers_empty": "💬 Список триггеров пуст."
 }

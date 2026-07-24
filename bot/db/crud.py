@@ -12,8 +12,13 @@ from sqlalchemy import delete, func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.constants import DEFAULT_LANGUAGE
-from bot.db.models import Chat, ChatSettings, ModLog, Stopword, User, Warn
+from bot.constants import (
+    DEFAULT_LANGUAGE,
+    TRIGGER_CONTAINS,
+    TRIGGER_PATTERN_MAX,
+    TRIGGER_REPLY_MAX,
+)
+from bot.db.models import Chat, ChatSettings, ModLog, Stopword, Trigger, User, Warn
 
 _INT32_MOD = 2_147_483_647
 
@@ -43,6 +48,7 @@ _SETTINGS_FIELDS = frozenset(
         "antiflood_action",
         "newbie_media_enabled",
         "newbie_period",
+        "triggers_enabled",
     }
 )
 
@@ -288,6 +294,66 @@ async def list_stopwords(session: AsyncSession, chat_id: int) -> list[str]:
         select(Stopword.word).where(Stopword.chat_id == chat_id).order_by(Stopword.word)
     )
     return list(result.scalars().all())
+
+
+# --------------------------------------------------------------------------- #
+# Triggers / auto-replies (Phase 3)
+# --------------------------------------------------------------------------- #
+async def add_trigger(
+    session: AsyncSession,
+    chat_id: int,
+    pattern: str,
+    reply_text: str,
+    match_type: str = TRIGGER_CONTAINS,
+) -> bool:
+    """Add a trigger (pattern is case-insensitively deduped). False if present."""
+    normalized = pattern.strip().lower()
+    if not normalized or not reply_text.strip():
+        return False
+    stmt = (
+        pg_insert(Trigger)
+        .values(
+            chat_id=chat_id,
+            pattern=normalized[:TRIGGER_PATTERN_MAX],
+            match_type=match_type,
+            reply_text=reply_text[:TRIGGER_REPLY_MAX],
+        )
+        .on_conflict_do_nothing(constraint="uq_triggers_chat_pattern")
+    )
+    result = await session.execute(stmt)
+    return bool(result.rowcount)
+
+
+async def remove_trigger(session: AsyncSession, chat_id: int, pattern: str) -> bool:
+    """Remove a trigger by pattern. False if it did not exist."""
+    normalized = pattern.strip().lower()
+    result = await session.execute(
+        delete(Trigger).where(Trigger.chat_id == chat_id, Trigger.pattern == normalized)
+    )
+    return bool(result.rowcount)
+
+
+async def list_triggers(session: AsyncSession, chat_id: int) -> list[dict[str, str]]:
+    """List a chat's triggers (alphabetical) as JSON-serializable dicts."""
+    result = await session.execute(
+        select(Trigger).where(Trigger.chat_id == chat_id).order_by(Trigger.pattern)
+    )
+    return [
+        {
+            "pattern": t.pattern,
+            "match_type": t.match_type,
+            "reply_text": t.reply_text,
+        }
+        for t in result.scalars().all()
+    ]
+
+
+async def count_triggers(session: AsyncSession, chat_id: int) -> int:
+    """Count a chat's triggers (for the per-chat limit check)."""
+    result = await session.execute(
+        select(func.count()).select_from(Trigger).where(Trigger.chat_id == chat_id)
+    )
+    return int(result.scalar_one())
 
 
 # --------------------------------------------------------------------------- #

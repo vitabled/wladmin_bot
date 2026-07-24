@@ -18,6 +18,8 @@ from bot.constants import (
     CAPTCHA_TYPES,
     NEWBIE_PERIOD_MAX,
     NEWBIE_PERIOD_MIN,
+    TRIGGER_MAX_PER_CHAT,
+    TRIGGER_SEPARATOR,
     WARN_ACTIONS,
     WARN_LIMIT_MAX,
     WARN_LIMIT_MIN,
@@ -93,6 +95,7 @@ async def cmd_settings(
         antiflood_action=s.get("antiflood_action", "mute"),
         newbie_media=onoff(s.get("newbie_media_enabled")),
         newbie_period=s.get("newbie_period", 3600),
+        triggers_enabled=onoff(s.get("triggers_enabled")),
     )
     await message.reply(text)
 
@@ -386,3 +389,87 @@ async def cmd_stopwords(
         return
     listing = "\n".join(f"• {w}" for w in words)
     await message.reply(_("stopwords_list", count=len(words), words=listing))
+
+
+@router.message(Command("addtrigger"))
+async def cmd_addtrigger(
+    message: types.Message, command: CommandObject, **data: Any
+) -> None:
+    """`/addtrigger <pattern> | <reply>` — add an auto-reply (enables triggers)."""
+    _ = data["_"]
+    if not _require_admin(data):
+        await message.reply(_("error_not_admin"))
+        return
+    raw = command.args or ""
+    if TRIGGER_SEPARATOR not in raw:
+        await message.reply(_("trigger_usage"))
+        return
+    pattern, reply_text = raw.split(TRIGGER_SEPARATOR, 1)
+    pattern, reply_text = pattern.strip(), reply_text.strip()
+    if not pattern or not reply_text:
+        await message.reply(_("trigger_usage"))
+        return
+
+    session: AsyncSession = data["session"]
+    redis: RedisClient = data["redis"]
+    if await crud.count_triggers(session, message.chat.id) >= TRIGGER_MAX_PER_CHAT:
+        await message.reply(_("trigger_limit", max=TRIGGER_MAX_PER_CHAT))
+        return
+    added = await crud.add_trigger(session, message.chat.id, pattern, reply_text)
+    if not added:
+        await message.reply(_("trigger_exists", pattern=pattern.lower()))
+        return
+    # First trigger auto-enables the feature so it works without a second step.
+    await _save(data, message.chat.id, triggers_enabled=True)
+    await redis.invalidate_triggers(message.chat.id)
+    await message.reply(_("trigger_added", pattern=pattern.lower()))
+
+
+@router.message(Command("deltrigger"))
+async def cmd_deltrigger(
+    message: types.Message, command: CommandObject, **data: Any
+) -> None:
+    _ = data["_"]
+    if not _require_admin(data):
+        await message.reply(_("error_not_admin"))
+        return
+    pattern = (command.args or "").strip()
+    if not pattern:
+        await message.reply(_("trigger_usage"))
+        return
+    session: AsyncSession = data["session"]
+    redis: RedisClient = data["redis"]
+    removed = await crud.remove_trigger(session, message.chat.id, pattern)
+    await redis.invalidate_triggers(message.chat.id)
+    key = "trigger_removed" if removed else "trigger_not_found"
+    await message.reply(_(key, pattern=pattern.lower()))
+
+
+@router.message(Command("triggers"))
+async def cmd_triggers(
+    message: types.Message, command: CommandObject, **data: Any
+) -> None:
+    """`/triggers` lists them; `/triggers on|off` toggles auto-replies."""
+    _ = data["_"]
+    if not _require_admin(data):
+        await message.reply(_("error_not_admin"))
+        return
+
+    arg = (command.args or "").strip()
+    if arg:
+        val = _parse_onoff(arg)
+        if val is None:
+            await message.reply(_("trigger_usage"))
+            return
+        await _save(data, message.chat.id, triggers_enabled=val)
+        key = "ok_enabled" if val else "ok_disabled"
+        await message.reply(_(key, feature=_("feature_triggers")))
+        return
+
+    session: AsyncSession = data["session"]
+    triggers = await crud.list_triggers(session, message.chat.id)
+    if not triggers:
+        await message.reply(_("triggers_empty"))
+        return
+    listing = "\n".join(f"• {t['pattern']} → {t['reply_text']}" for t in triggers)
+    await message.reply(_("triggers_list", count=len(triggers), triggers=listing))
