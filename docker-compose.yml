@@ -117,10 +117,12 @@ services:
         condition: service_started
       dashboard:
         condition: service_started
+    # Render templates (the image's entrypoint skips its envsubst step when the
+    # command isn't "nginx"), then reload every 6h to pick up renewed certs.
     command:
       - sh
       - -c
-      - "while :; do sleep 6h & wait $${!}; nginx -s reload; done & exec nginx -g 'daemon off;'"
+      - "/docker-entrypoint.d/20-envsubst-on-templates.sh; while :; do sleep 6h & wait $${!}; nginx -s reload; done & exec nginx -g 'daemon off;'"
 
   # Let's Encrypt: issue the cert once (see CLAUDE.md), then auto-renew every
   # 12h. A no-op until a real cert is issued for ${DOMAIN}.
