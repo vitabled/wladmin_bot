@@ -5,6 +5,7 @@
 ## Project Status
 
 ✅ **Phase 1 Complete** — Core infrastructure, moderation, antispam, captcha, welcome messages.
+✅ **Phase 2 Complete** — Anti-flood (per-window counter) + media restrictions for newbies; ☰ command menu (`set_my_commands`).
 
 ## Architecture
 
@@ -24,6 +25,7 @@
 
 ### Business Logic (Pure Functions)
 - `bot/services/antispam.py` — Link/forward/stopword detection
+- `bot/services/antiflood.py` — Flood predicate + newbie restricted-media check (Phase 2)
 - `bot/services/warns.py` — Warn counting and action triggers
 - `bot/services/captcha.py` — Math/emoji/button captcha generation
 - `bot/services/moderation.py` — Duration parsing, unban date calculation
@@ -34,7 +36,9 @@
 - `bot/handlers/settings_cmd.py` — /settings, /welcome, /captcha, /antispam, /addstop …
 - `bot/handlers/captcha.py` — New-member captcha (restrict → challenge → verify/timeout)
 - `bot/handlers/welcome.py` — Welcome messages + service-message cleanup
-- `bot/handlers/antispam.py` — Per-message link/forward/stopword filtering
+- `bot/handlers/antispam.py` — Per-message link/forward/stopword filtering (also invokes Phase 2 guards)
+- `bot/handlers/antiflood.py` — Anti-flood + newbie-media guards, called from the per-message handler (Phase 2)
+- `bot/commands.py` — Registers the ☰ command menu (`set_my_commands`) on startup
 - `bot/handlers/actions.py` — Reusable moderation actions (ban/mute/kick/warn)
 - `bot/filters/is_admin.py` — Admin/owner check filter
 - `bot/filters/chat_type.py` — Private/group filters
@@ -55,8 +59,11 @@
 - `bot/utils/targets.py` — Resolve moderation target (reply/mention/id/@username)
 - `bot/utils/tasks.py` — Background task registry (captcha timeout, delayed delete)
 
-### Testing (114 tests)
+### Testing (143 tests)
 - `tests/test_antispam.py` — Antispam detection (service)
+- `tests/test_antiflood.py` — Anti-flood / newbie-media predicates (service)
+- `tests/test_handlers_antiflood.py` — Flood/newbie guards + /antiflood /newbie commands
+- `tests/test_commands.py` — ☰ command-menu registration
 - `tests/test_warns.py` — Warn system logic (service)
 - `tests/test_captcha.py` — Captcha generation/verification (service)
 - `tests/test_moderation.py` — Duration parsing, ban dates (service)
@@ -131,7 +138,7 @@ make revision m="add field"                     # autogenerate a new migration
 
 ## Phase 2+ Roadmap
 
-- **Phase 2**: Anti-flood, media restrictions for newbies
+- ✅ **Phase 2**: Anti-flood, media restrictions for newbies — **done**
 - **Phase 3**: Custom filters, triggers, auto-replies
 - **Phase 4**: User statistics, activity reports
 - **Phase 5**: Scheduled posting

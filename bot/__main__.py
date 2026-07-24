@@ -12,6 +12,7 @@ from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_applicati
 from aiohttp import web
 
 from bot.cache.redis import RedisClient
+from bot.commands import setup_bot_commands
 from bot.config import configure_logging, get_settings
 from bot.db.session import create_engine, get_async_session_maker
 from bot.handlers import (
@@ -96,6 +97,9 @@ async def on_startup(app: web.Application) -> None:
         logger.info("bot.started")
     except Exception:
         logger.exception("set_webhook.failed")
+
+    # Populate the ☰ command menu (best-effort, non-fatal).
+    await setup_bot_commands(bot)
 
 
 async def on_shutdown(app: web.Application) -> None:

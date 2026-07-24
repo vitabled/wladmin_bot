@@ -207,6 +207,10 @@ async def on_new_members(message: types.Message, **data: Any) -> None:
         if user.is_bot:
             continue
         await crud.upsert_user(session, user.id, user.first_name, user.username)
+        if settings.get("newbie_media_enabled"):
+            await redis.mark_newbie(
+                chat.id, user.id, int(settings.get("newbie_period") or 3600)
+            )
         started = False
         if settings.get("captcha_enabled"):
             started = await _start_captcha(

@@ -43,6 +43,12 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "filter_stopwords": False,
     "antispam_action": "delete",
     "antispam_exempt_admins": True,
+    "antiflood_enabled": False,
+    "antiflood_limit": 5,
+    "antiflood_window": 5,
+    "antiflood_action": "mute",
+    "newbie_media_enabled": False,
+    "newbie_period": 3600,
 }
 
 BOT_ID = 42
@@ -100,12 +106,14 @@ def make_message(
     is_automatic_forward: bool = False,
     new_chat_members: list | None = None,
     caption: str | None = None,
+    content_type: str = "text",
     message_id: int = 555,
     bot: MagicMock | None = None,
 ) -> MagicMock:
     msg = MagicMock()
     msg.text = text
     msg.caption = caption
+    msg.content_type = content_type
     msg.chat = chat or make_chat()
     msg.from_user = from_user or make_user(1000, "Actor", "actor")
     msg.reply_to_message = reply_to_message

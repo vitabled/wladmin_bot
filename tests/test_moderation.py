@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from bot.services.moderation import ModerationService
 
@@ -53,8 +53,11 @@ class TestModerationService:
     def test_get_unban_date_temporary(self):
         """Test temporary ban unban date calculation."""
         unban_date = ModerationService.get_unban_date(3600)
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         assert unban_date is not None
+        # Contract: unban dates are timezone-aware UTC (guards against a
+        # regression back to naive datetime.utcnow()).
+        assert unban_date.tzinfo is not None
         assert unban_date > now
         assert unban_date < now + timedelta(seconds=3700)
 
@@ -64,12 +67,12 @@ class TestModerationService:
 
     def test_should_auto_unban_expired(self):
         """Test expired ban should auto-unban."""
-        past_date = datetime.utcnow() - timedelta(seconds=10)
+        past_date = datetime.now(UTC) - timedelta(seconds=10)
         assert ModerationService.should_auto_unban(past_date)
 
     def test_should_auto_unban_not_expired(self):
         """Test non-expired ban should not auto-unban."""
-        future_date = datetime.utcnow() + timedelta(seconds=3600)
+        future_date = datetime.now(UTC) + timedelta(seconds=3600)
         assert not ModerationService.should_auto_unban(future_date)
 
     def test_validate_command_args_single(self):

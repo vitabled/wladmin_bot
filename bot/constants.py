@@ -45,6 +45,37 @@ CAPTCHA_OPTIONS_COUNT: Final = 4
 # permanent, so we clamp temporary restrictions to this floor.
 MIN_RESTRICT_SECONDS: Final = 30
 
+# --- Anti-flood (Phase 2) -----------------------------------------------
+ANTIFLOOD_ACTIONS: Final = frozenset({ACTION_MUTE, ACTION_KICK, ACTION_BAN})
+ANTIFLOOD_LIMIT_MIN: Final = 2
+ANTIFLOOD_LIMIT_MAX: Final = 100
+ANTIFLOOD_WINDOW_MIN: Final = 1
+ANTIFLOOD_WINDOW_MAX: Final = 3600
+# How long (seconds) a flooder stays muted when antiflood_action == "mute".
+ANTIFLOOD_MUTE_SECONDS: Final = 3600
+
+# --- Newbie media restriction (Phase 2) ---------------------------------
+NEWBIE_PERIOD_MIN: Final = 60
+NEWBIE_PERIOD_MAX: Final = 604_800  # 7 days
+# Content types a member on probation (recently joined) may not send.
+NEWBIE_RESTRICTED_CONTENT: Final = frozenset(
+    {
+        "photo",
+        "video",
+        "animation",
+        "document",
+        "audio",
+        "voice",
+        "video_note",
+        "sticker",
+        "poll",
+        "game",
+        "dice",
+        "contact",
+        "location",
+    }
+)
+
 # --- Default welcome text placeholders ----------------------------------
 DEFAULT_WELCOME_TEXT: Final = "{mention}, добро пожаловать в {chat_title}!"
 

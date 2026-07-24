@@ -12,7 +12,7 @@ from bot.cache.redis import RedisClient
 from bot.constants import ACTION_BAN, ACTION_MUTE, ACTION_WARN
 from bot.db import crud
 from bot.filters.chat_type import IsGroup
-from bot.handlers import actions
+from bot.handlers import actions, antiflood
 from bot.services.antispam import AntispamService
 from bot.utils.telegram import safe_delete_message
 
@@ -110,11 +110,31 @@ async def _process(message: types.Message, data: dict[str, Any]) -> None:
     # action == "delete": message already removed above.
 
 
+def _guards_applicable(message: types.Message, data: dict[str, Any]) -> bool:
+    """Phase 2 guards run for non-admin, real user messages in a group."""
+    if data.get("is_admin"):
+        return False
+    if not data.get("settings"):
+        return False
+    return message.sender_chat is None and not message.is_automatic_forward
+
+
 @router.message()
 async def on_message(message: types.Message, **data: Any) -> None:
+    if _guards_applicable(message, data):
+        if await antiflood.enforce_newbie_media(message, data):
+            return
+        if await antiflood.enforce_flood(message, data):
+            return
     await _process(message, data)
 
 
 @router.edited_message()
 async def on_edited_message(message: types.Message, **data: Any) -> None:
+    # Newbie media applies to edits too (join → text → edit-in-media bypass);
+    # flood counting does not — editing an old message isn't flooding.
+    if _guards_applicable(message, data) and await antiflood.enforce_newbie_media(
+        message, data
+    ):
+        return
     await _process(message, data)

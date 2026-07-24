@@ -160,3 +160,40 @@ class RedisClient:
         except Exception as e:
             logger.error(f"Redis delete_captcha error: {e}")
             return False
+
+    # --- Domain helpers: anti-flood counter (Phase 2) ---------------------
+    @staticmethod
+    def _flood_key(chat_id: int, user_id: int) -> str:
+        return f"flood:{chat_id}:{user_id}"
+
+    async def bump_flood(self, chat_id: int, user_id: int, window: int) -> int:
+        """Fixed-window message counter; returns the running count.
+
+        The first message of a window sets the TTL, so the counter self-resets
+        ``window`` seconds after the burst started. Returns 0 on Redis error
+        (fail-open: never punish because the counter was unavailable).
+        """
+        key = self._flood_key(chat_id, user_id)
+        count = await self.incr(key)
+        if count is None:
+            return 0
+        if count == 1:
+            await self.expire(key, max(window, 1))
+        return count
+
+    async def reset_flood(self, chat_id: int, user_id: int) -> None:
+        """Clear the flood counter (after acting, so we punish once per burst)."""
+        await self.delete(self._flood_key(chat_id, user_id))
+
+    # --- Domain helpers: newbie probation (Phase 2) -----------------------
+    @staticmethod
+    def _newbie_key(chat_id: int, user_id: int) -> str:
+        return f"newbie:{chat_id}:{user_id}"
+
+    async def mark_newbie(self, chat_id: int, user_id: int, ttl: int) -> None:
+        """Flag a freshly-joined user as a newbie for ``ttl`` seconds."""
+        await self.set(self._newbie_key(chat_id, user_id), "1", ttl=max(ttl, 1))
+
+    async def is_newbie(self, chat_id: int, user_id: int) -> bool:
+        """True while the user's probation window is still active."""
+        return await self.exists(self._newbie_key(chat_id, user_id))

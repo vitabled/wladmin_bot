@@ -48,7 +48,7 @@ class ModerationService:
         if duration_seconds is None:
             return None
 
-        return datetime.utcnow() + timedelta(seconds=duration_seconds)
+        return datetime.now(UTC) + timedelta(seconds=duration_seconds)
 
     @staticmethod
     def get_until_date_aware(
@@ -68,7 +68,7 @@ class ModerationService:
         if unban_date is None:
             return False
 
-        return datetime.utcnow() >= unban_date
+        return datetime.now(UTC) >= unban_date
 
     @staticmethod
     def validate_command_args(

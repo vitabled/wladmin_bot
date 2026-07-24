@@ -37,6 +37,12 @@ _SETTINGS_FIELDS = frozenset(
         "filter_stopwords",
         "antispam_action",
         "antispam_exempt_admins",
+        "antiflood_enabled",
+        "antiflood_limit",
+        "antiflood_window",
+        "antiflood_action",
+        "newbie_media_enabled",
+        "newbie_period",
     }
 )
 

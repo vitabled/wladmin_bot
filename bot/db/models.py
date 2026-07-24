@@ -92,6 +92,16 @@ class ChatSettings(Base):
     antispam_action: Mapped[str] = mapped_column(String(20), default="delete")
     antispam_exempt_admins: Mapped[bool] = mapped_column(Boolean, default=True)
 
+    # Anti-flood (Phase 2)
+    antiflood_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    antiflood_limit: Mapped[int] = mapped_column(Integer, default=5)
+    antiflood_window: Mapped[int] = mapped_column(Integer, default=5)
+    antiflood_action: Mapped[str] = mapped_column(String(20), default="mute")
+
+    # Newbie media restriction (Phase 2)
+    newbie_media_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    newbie_period: Mapped[int] = mapped_column(Integer, default=3600)
+
     chat: Mapped[Chat] = relationship(back_populates="settings")
 
 

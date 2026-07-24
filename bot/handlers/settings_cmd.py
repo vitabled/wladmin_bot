@@ -10,7 +10,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.cache.redis import RedisClient
 from bot.constants import (
+    ANTIFLOOD_ACTIONS,
+    ANTIFLOOD_LIMIT_MAX,
+    ANTIFLOOD_LIMIT_MIN,
+    ANTIFLOOD_WINDOW_MAX,
+    ANTIFLOOD_WINDOW_MIN,
     CAPTCHA_TYPES,
+    NEWBIE_PERIOD_MAX,
+    NEWBIE_PERIOD_MIN,
     WARN_ACTIONS,
     WARN_LIMIT_MAX,
     WARN_LIMIT_MIN,
@@ -80,6 +87,12 @@ async def cmd_settings(
         filter_forwards=onoff(s["filter_forwards"]),
         filter_stopwords=onoff(s["filter_stopwords"]),
         antispam_action=s["antispam_action"],
+        antiflood_enabled=onoff(s.get("antiflood_enabled")),
+        antiflood_limit=s.get("antiflood_limit", 5),
+        antiflood_window=s.get("antiflood_window", 5),
+        antiflood_action=s.get("antiflood_action", "mute"),
+        newbie_media=onoff(s.get("newbie_media_enabled")),
+        newbie_period=s.get("newbie_period", 3600),
     )
     await message.reply(text)
 
@@ -234,6 +247,88 @@ async def cmd_antispam(
     await _save(data, message.chat.id, **{field: val})
     state = _("value_on") if val else _("value_off")
     await message.reply(_("antispam_set", filter=parts[0].lower(), state=state))
+
+
+@router.message(Command("antiflood"))
+async def cmd_antiflood(
+    message: types.Message, command: CommandObject, **data: Any
+) -> None:
+    """`/antiflood on|off` toggles; `/antiflood <limit> <window> [action]` configures."""
+    _ = data["_"]
+    if not _require_admin(data):
+        await message.reply(_("error_not_admin"))
+        return
+    parts = (command.args or "").split()
+    if not parts:
+        await message.reply(_("antiflood_usage"))
+        return
+
+    onoff = _parse_onoff(parts[0])
+    if onoff is not None and len(parts) == 1:
+        await _save(data, message.chat.id, antiflood_enabled=onoff)
+        key = "ok_enabled" if onoff else "ok_disabled"
+        await message.reply(_(key, feature=_("feature_antiflood")))
+        return
+
+    if len(parts) < 2 or not parts[0].isdigit() or not parts[1].isdigit():
+        await message.reply(_("antiflood_usage"))
+        return
+    limit, window = int(parts[0]), int(parts[1])
+    if not (ANTIFLOOD_LIMIT_MIN <= limit <= ANTIFLOOD_LIMIT_MAX) or not (
+        ANTIFLOOD_WINDOW_MIN <= window <= ANTIFLOOD_WINDOW_MAX
+    ):
+        await message.reply(_("antiflood_usage"))
+        return
+    action = parts[2].lower() if len(parts) > 2 else "mute"
+    if action not in ANTIFLOOD_ACTIONS:
+        await message.reply(_("antiflood_usage"))
+        return
+    await _save(
+        data,
+        message.chat.id,
+        antiflood_enabled=True,
+        antiflood_limit=limit,
+        antiflood_window=window,
+        antiflood_action=action,
+    )
+    await message.reply(_("antiflood_set", limit=limit, window=window, action=action))
+
+
+@router.message(Command("newbie"))
+async def cmd_newbie(
+    message: types.Message, command: CommandObject, **data: Any
+) -> None:
+    """`/newbie on|off` toggles; `/newbie <seconds>` sets the probation window."""
+    _ = data["_"]
+    if not _require_admin(data):
+        await message.reply(_("error_not_admin"))
+        return
+    parts = (command.args or "").split()
+    if not parts:
+        await message.reply(_("newbie_usage"))
+        return
+
+    onoff = _parse_onoff(parts[0])
+    if onoff is not None:
+        await _save(data, message.chat.id, newbie_media_enabled=onoff)
+        key = "ok_enabled" if onoff else "ok_disabled"
+        await message.reply(_(key, feature=_("feature_newbie")))
+        return
+
+    if not parts[0].isdigit():
+        await message.reply(_("newbie_usage"))
+        return
+    period = int(parts[0])
+    if not NEWBIE_PERIOD_MIN <= period <= NEWBIE_PERIOD_MAX:
+        await message.reply(_("newbie_usage"))
+        return
+    await _save(
+        data,
+        message.chat.id,
+        newbie_media_enabled=True,
+        newbie_period=period,
+    )
+    await message.reply(_("newbie_set", period=period))
 
 
 @router.message(Command("addstop"))
