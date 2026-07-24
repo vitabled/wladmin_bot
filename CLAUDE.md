@@ -9,6 +9,7 @@
 ✅ **Phase 3 Complete** — Custom triggers / auto-replies (contains/exact/starts matching, per-chat, cached).
 ✅ **Phase 4 Complete** — Per-user activity stats + leaderboards (`/stats`, `/top`), opt-out per chat.
 ✅ **Phase 5 Complete** — Scheduled posting (one-off + recurring) via an in-process asyncio worker.
+✅ **Phase 6 Complete** — Inline settings menu (`/menu`): toggle features with callback buttons.
 
 ## Architecture
 
@@ -47,6 +48,7 @@
 - `bot/handlers/triggers.py` — Trigger auto-replies, called from the per-message handler after antispam (Phase 3)
 - `bot/handlers/stats.py` — /stats, /top commands + record_activity hook (Phase 4)
 - `bot/handlers/schedule.py` — /schedule, /schedules, /unschedule commands (Phase 5)
+- `bot/handlers/menu.py` — /menu inline settings toggles via callback_query (Phase 6)
 - `bot/scheduler.py` — background worker loop posting due messages (Phase 5)
 - `bot/commands.py` — Registers the ☰ command menu (`set_my_commands`) on startup
 - `bot/handlers/actions.py` — Reusable moderation actions (ban/mute/kick/warn)
@@ -69,7 +71,7 @@
 - `bot/utils/targets.py` — Resolve moderation target (reply/mention/id/@username)
 - `bot/utils/tasks.py` — Background task registry (captcha timeout, delayed delete)
 
-### Testing (204 tests)
+### Testing (212 tests)
 - `tests/test_antispam.py` — Antispam detection (service)
 - `tests/test_antiflood.py` — Anti-flood / newbie-media predicates (service)
 - `tests/test_handlers_antiflood.py` — Flood/newbie guards + /antiflood /newbie commands
@@ -79,6 +81,7 @@
 - `tests/test_handlers_stats.py` — record_activity + /stats /top
 - `tests/test_scheduler.py` — is_due / next_run timing (service)
 - `tests/test_handlers_schedule.py` — /schedule /schedules /unschedule + worker tick
+- `tests/test_handlers_menu.py` — inline menu keyboard + toggle callbacks
 - `tests/test_commands.py` — ☰ command-menu registration
 - `tests/test_warns.py` — Warn system logic (service)
 - `tests/test_captcha.py` — Captcha generation/verification (service)
@@ -159,7 +162,7 @@ make revision m="add field"                     # autogenerate a new migration
 - ✅ **Phase 4**: User statistics, activity reports — **done**
 - **Phase 4**: User statistics, activity reports
 - ✅ **Phase 5**: Scheduled posting — **done**
-- **Phase 6**: Settings via private menu (inline buttons)
+- ✅ **Phase 6**: Settings via inline menu (buttons) — **done**
 - **Phase 7**: Web dashboard (OAuth Telegram Login)
 - **Phase 8**: Federated groups
 

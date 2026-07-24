@@ -19,6 +19,7 @@ from bot.handlers import (
     antispam,
     captcha,
     common,
+    menu,
     moderation,
     schedule,
     settings_cmd,
@@ -62,6 +63,7 @@ def build_dispatcher(
 
     # Order matters: specific command/event routers first, catch-all antispam last.
     dp.include_router(common.router)
+    dp.include_router(menu.router)
     dp.include_router(settings_cmd.router)
     dp.include_router(moderation.router)
     dp.include_router(stats.router)

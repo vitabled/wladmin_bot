@@ -1,7 +1,7 @@
 {
   "cmd_start": "👋 Hi! I'm a group administration bot for Telegram.\n\nAdd me to a group and grant admin rights. Features:\n• Moderation: /ban /kick /mute /warn\n• Captcha for new members\n• Antispam: links, forwards, stopwords\n• Customizable welcome messages\n\n/help — command list.",
   "cmd_help_private": "📚 Commands:\n/start — welcome\n/help — this help\n\nAdd me to a group and use /help there to see moderation commands (admins only).",
-  "cmd_help_group": "📚 Moderation commands (admins only):\n\n/ban [duration] [reason] — ban\n/unban — unban\n/kick — remove without ban\n/mute [duration] [reason] — mute\n/unmute — unmute\n/warn [reason] — warn\n/unwarn — remove last warning\n/warns — show warnings\n\n⚙️ Settings:\n/settings — current settings\n/welcome on|off, /setwelcome <text>\n/captcha on|off, /setcaptcha button|math|emoji\n/setwarnlimit <N>, /setwarnaction mute|kick|ban [duration]\n/antispam links|forwards|stopwords on|off\n/antiflood on|off | <limit> <window> [mute|kick|ban]\n/newbie on|off | <seconds>\n/addstop <word>, /delstop <word>, /stopwords\n/addtrigger <phrase> | <reply>, /deltrigger <phrase>, /triggers [on|off]\n\n📊 Statistics:\n/stats [on|off] — my stats / toggle tracking\n/top [N] — most active users\n\n🗓 Scheduled posts:\n/schedule <in> [<interval>] | <text>\n/schedules — list, /unschedule <id>",
+  "cmd_help_group": "📚 Moderation commands (admins only):\n\n/ban [duration] [reason] — ban\n/unban — unban\n/kick — remove without ban\n/mute [duration] [reason] — mute\n/unmute — unmute\n/warn [reason] — warn\n/unwarn — remove last warning\n/warns — show warnings\n\n⚙️ Settings:\n/settings — current settings\n/menu — settings menu with buttons\n/welcome on|off, /setwelcome <text>\n/captcha on|off, /setcaptcha button|math|emoji\n/setwarnlimit <N>, /setwarnaction mute|kick|ban [duration]\n/antispam links|forwards|stopwords on|off\n/antiflood on|off | <limit> <window> [mute|kick|ban]\n/newbie on|off | <seconds>\n/addstop <word>, /delstop <word>, /stopwords\n/addtrigger <phrase> | <reply>, /deltrigger <phrase>, /triggers [on|off]\n\n📊 Statistics:\n/stats [on|off] — my stats / toggle tracking\n/top [N] — most active users\n\n🗓 Scheduled posts:\n/schedule <in> [<interval>] | <text>\n/schedules — list, /unschedule <id>",
   "error_not_admin": "❌ Only administrators can use this command.",
   "error_bot_not_admin": "❌ I'm not an admin in this chat or I lack permissions.",
   "error_bot_cant_restrict": "❌ I don't have the right to restrict members.",
@@ -102,5 +102,17 @@
   "schedules_item": "#{id} — {when} (repeat: {every})\n  {preview}",
   "schedules_empty": "🗓 No scheduled posts.",
   "unschedule_ok": "✅ Post unscheduled.",
-  "unschedule_not_found": "ℹ️ No post with that id."
+  "unschedule_not_found": "ℹ️ No post with that id.",
+  "menu_title": "⚙️ Settings menu. Tap to toggle:",
+  "menu_welcome": "Welcome",
+  "menu_captcha": "Captcha",
+  "menu_links": "Link filter",
+  "menu_forwards": "Forward filter",
+  "menu_stopwords": "Stopword filter",
+  "menu_antiflood": "Anti-flood",
+  "menu_newbie": "Newbie media",
+  "menu_triggers": "Triggers",
+  "menu_stats": "Statistics",
+  "menu_close": "✖ Close",
+  "menu_saved": "Saved ✅"
 }

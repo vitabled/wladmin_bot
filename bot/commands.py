@@ -27,6 +27,7 @@ _PRIVATE: list[tuple[str, dict[str, str]]] = [
 _ADMIN: list[tuple[str, dict[str, str]]] = [
     ("help", {"en": "Command help", "ru": "Справка"}),
     ("settings", {"en": "Show current settings", "ru": "Текущие настройки"}),
+    ("menu", {"en": "Settings menu (buttons)", "ru": "Меню настроек (кнопки)"}),
     ("ban", {"en": "Ban a user", "ru": "Забанить"}),
     ("unban", {"en": "Unban a user", "ru": "Разбанить"}),
     ("kick", {"en": "Kick a user", "ru": "Выгнать"}),
