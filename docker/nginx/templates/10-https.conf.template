@@ -1,0 +1,40 @@
+# :443 — single domain, path-based routing:
+#   /webhook (+ /health) → bot:8000 (Telegram webhook)
+#   everything else       → dashboard:8080 (web panel)
+# Certs come from the certbot volume; a self-signed placeholder is seeded by
+# nginx-init so nginx can start before a real cert is issued.
+#
+# NOTE: if you change WEBHOOK_PATH (default /webhook), update the location below.
+server {
+    listen 443 ssl default_server;
+    http2 on;
+    server_name ${DOMAIN};
+
+    ssl_certificate     /etc/nginx/certs/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/nginx/certs/live/${DOMAIN}/privkey.pem;
+
+    client_max_body_size 1m;
+
+    # --- proxy #1: bot webhook -------------------------------------------
+    location = /webhook {
+        proxy_pass http://bot:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location = /health {
+        proxy_pass http://bot:8000;
+    }
+
+    # --- proxy #2: web dashboard (catch-all) -----------------------------
+    location / {
+        proxy_pass http://dashboard:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}

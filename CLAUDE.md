@@ -132,13 +132,27 @@
 ```bash
 docker-compose up
 ```
-Runs bot (`:8000/webhook`), dashboard (`:8080`), PostgreSQL, Redis, and an
-nginx reverse proxy on `:80`/`:443`. nginx routes by hostname:
-`WEBHOOK_DOMAIN` → bot webhook, `DASHBOARD_DOMAIN` → dashboard (config in
-`docker/nginx/templates/`). Port 80 serves the ACME challenge and redirects to
-443; a self-signed cert is generated into the `nginx_certs` volume on first run
-(replace with real certs for production). To try the dashboard without a domain,
-set `WEB_DEV_LOGIN=1` and open `http://localhost:8080/dev-login`.
+Runs bot (`:8000/webhook`), dashboard (`:8080`), PostgreSQL, Redis, an nginx
+reverse proxy on `:80`/`:443`, and certbot. **Single domain, path routing**
+(`docker/nginx/templates/`): `/webhook` (+ `/health`) → bot, everything else →
+dashboard. Port 80 serves the ACME challenge and redirects to 443. `nginx-init`
+seeds a self-signed cert at certbot's live path so nginx boots before a real
+cert exists; nginx reloads every 6h to pick up renewals.
+
+To try the dashboard **without a domain**: `WEB_DEV_LOGIN=1`, then
+`http://localhost:8080/dev-login`.
+
+**Issue a real cert** (once DNS for `$DOMAIN` points at the host, port 80 open):
+```bash
+docker compose up -d nginx
+docker compose run --rm --entrypoint sh certbot -c \
+  "rm -rf /etc/letsencrypt/live/$DOMAIN /etc/letsencrypt/archive/$DOMAIN /etc/letsencrypt/renewal/$DOMAIN.conf; \
+   certbot certonly --webroot -w /var/www/certbot -d $DOMAIN \
+   --email $CERTBOT_EMAIL --agree-tos --no-eff-email"
+docker compose exec nginx nginx -s reload
+```
+The removal step drops the self-signed placeholder so certbot can create its own
+lineage. The `certbot` service then auto-renews every 12h.
 
 ### Local Dev
 ```bash
