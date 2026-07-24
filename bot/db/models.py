@@ -206,6 +206,30 @@ class Activity(Base):
     )
 
 
+class ScheduledPost(Base):
+    """A one-off or recurring message the bot posts to a chat (Phase 5)."""
+
+    __tablename__ = "scheduled_posts"
+    __table_args__ = (Index("ix_sched_enabled_run", "enabled", "run_at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    chat_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("chats.chat_id", ondelete="CASCADE")
+    )
+    text: Mapped[str] = mapped_column(Text)
+    run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # NULL interval => one-off; otherwise seconds between recurrences.
+    interval_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[int] = mapped_column(BigInteger)
+    last_run_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class ModLog(Base):
     __tablename__ = "mod_log"
     __table_args__ = (Index("ix_mod_log_chat_created", "chat_id", "created_at"),)

@@ -1,7 +1,7 @@
 {
   "cmd_start": "👋 Привет! Я бот-администратор для Telegram-групп.\n\nДобавьте меня в группу и дайте права администратора. Возможности:\n• Модерация: /ban /kick /mute /warn\n• Капча для новых участников\n• Антиспам: ссылки, пересланные, стоп-слова\n• Настраиваемые приветствия\n\n/help — список команд.",
   "cmd_help_private": "📚 Команды:\n/start — приветствие\n/help — эта справка\n\nДобавьте меня в группу и используйте /help там, чтобы увидеть команды модерации (доступны админам).",
-  "cmd_help_group": "📚 Команды модерации (только для админов):\n\n/ban [срок] [причина] — забанить\n/unban — разбанить\n/kick — выгнать без бана\n/mute [срок] [причина] — замутить\n/unmute — размутить\n/warn [причина] — предупреждение\n/unwarn — снять последнее предупреждение\n/warns — показать предупреждения\n\n⚙️ Настройки:\n/settings — текущие настройки\n/welcome on|off, /setwelcome <текст>\n/captcha on|off, /setcaptcha button|math|emoji\n/setwarnlimit <N>, /setwarnaction mute|kick|ban [срок]\n/antispam links|forwards|stopwords on|off\n/antiflood on|off | <лимит> <окно> [mute|kick|ban]\n/newbie on|off | <секунды>\n/addstop <слово>, /delstop <слово>, /stopwords\n/addtrigger <фраза> | <ответ>, /deltrigger <фраза>, /triggers [on|off]\n\n📊 Статистика:\n/stats [on|off] — моя статистика / вкл-выкл учёта\n/top [N] — самые активные",
+  "cmd_help_group": "📚 Команды модерации (только для админов):\n\n/ban [срок] [причина] — забанить\n/unban — разбанить\n/kick — выгнать без бана\n/mute [срок] [причина] — замутить\n/unmute — размутить\n/warn [причина] — предупреждение\n/unwarn — снять последнее предупреждение\n/warns — показать предупреждения\n\n⚙️ Настройки:\n/settings — текущие настройки\n/welcome on|off, /setwelcome <текст>\n/captcha on|off, /setcaptcha button|math|emoji\n/setwarnlimit <N>, /setwarnaction mute|kick|ban [срок]\n/antispam links|forwards|stopwords on|off\n/antiflood on|off | <лимит> <окно> [mute|kick|ban]\n/newbie on|off | <секунды>\n/addstop <слово>, /delstop <слово>, /stopwords\n/addtrigger <фраза> | <ответ>, /deltrigger <фраза>, /triggers [on|off]\n\n📊 Статистика:\n/stats [on|off] — моя статистика / вкл-выкл учёта\n/top [N] — самые активные\n\n🗓 Отложенные посты:\n/schedule <через> [<интервал>] | <текст>\n/schedules — список, /unschedule <id>",
   "error_not_admin": "❌ Эту команду могут использовать только администраторы.",
   "error_bot_not_admin": "❌ Я не администратор в этом чате или мне не хватает прав.",
   "error_bot_cant_restrict": "❌ У меня нет права ограничивать участников.",
@@ -92,5 +92,15 @@
   "stats_text": "📊 Твои сообщения: {mine} ({share}% из {total}).\nУчтено пользователей: {users}.",
   "top_header": "🏆 Самые активные ({count}):",
   "top_item": "{medal} {user} — {count}",
-  "top_empty": "📊 Активность ещё не накоплена."
+  "top_empty": "📊 Активность ещё не накоплена.",
+  "schedule_usage": "❌ Использование: /schedule <через> [<интервал>] | <текст>. Примеры: /schedule 1h | Привет!  •  /schedule 10m 6h | Каждые 6ч.",
+  "schedule_once": "разово",
+  "schedule_min_interval": "❌ Минимальный интервал повтора — {min}.",
+  "schedule_limit": "❌ Достигнут лимит отложенных постов ({max}).",
+  "schedule_added": "✅ Пост #{id} запланирован через {delay} (повтор: {every}).",
+  "schedules_list": "🗓 Отложенные посты ({count}):\n{items}",
+  "schedules_item": "#{id} — {when} (повтор: {every})\n  {preview}",
+  "schedules_empty": "🗓 Отложенных постов нет.",
+  "unschedule_ok": "✅ Пост снят с расписания.",
+  "unschedule_not_found": "ℹ️ Пост с таким id не найден."
 }

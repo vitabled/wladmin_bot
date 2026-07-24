@@ -20,6 +20,7 @@ from bot.handlers import (
     captcha,
     common,
     moderation,
+    schedule,
     settings_cmd,
     stats,
     welcome,
@@ -29,7 +30,8 @@ from bot.middlewares.admin import AdminMiddleware
 from bot.middlewares.database import DatabaseMiddleware
 from bot.middlewares.i18n import I18nMiddleware
 from bot.middlewares.settings import SettingsMiddleware
-from bot.utils.tasks import cancel_all
+from bot.scheduler import run_scheduler
+from bot.utils.tasks import cancel_all, spawn
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +65,7 @@ def build_dispatcher(
     dp.include_router(settings_cmd.router)
     dp.include_router(moderation.router)
     dp.include_router(stats.router)
+    dp.include_router(schedule.router)
     dp.include_router(captcha.router)
     dp.include_router(welcome.router)
     dp.include_router(antispam.router)
@@ -103,6 +106,10 @@ async def on_startup(app: web.Application) -> None:
     # Populate the ☰ command menu (best-effort, non-fatal).
     await setup_bot_commands(bot)
 
+    # Start the scheduled-posting worker (cancelled on shutdown by cancel_all).
+    spawn(run_scheduler(bot, app["session_maker"]))
+    logger.info("scheduler.spawned")
+
 
 async def on_shutdown(app: web.Application) -> None:
     await cancel_all()
@@ -138,6 +145,7 @@ def main() -> None:
     app["dp"] = dp
     app["redis"] = redis
     app["engine"] = engine
+    app["session_maker"] = session_maker
     app.on_startup.append(on_startup)
     app.on_shutdown.append(on_shutdown)
 

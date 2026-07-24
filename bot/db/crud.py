@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import delete, func, select, text
@@ -23,6 +24,7 @@ from bot.db.models import (
     Chat,
     ChatSettings,
     ModLog,
+    ScheduledPost,
     Stopword,
     Trigger,
     User,
@@ -433,6 +435,101 @@ async def chat_activity_totals(session: AsyncSession, chat_id: int) -> tuple[int
     )
     total, users = result.one()
     return int(total), int(users)
+
+
+# --------------------------------------------------------------------------- #
+# Scheduled posts (Phase 5)
+# --------------------------------------------------------------------------- #
+async def add_scheduled_post(
+    session: AsyncSession,
+    chat_id: int,
+    text_body: str,
+    run_at: datetime,
+    interval_seconds: int | None,
+    created_by: int,
+) -> ScheduledPost:
+    """Create a scheduled post and return it (with its generated id)."""
+    post = ScheduledPost(
+        chat_id=chat_id,
+        text=text_body,
+        run_at=run_at,
+        interval_seconds=interval_seconds,
+        created_by=created_by,
+        enabled=True,
+    )
+    session.add(post)
+    await session.flush()
+    return post
+
+
+async def list_scheduled_posts(
+    session: AsyncSession, chat_id: int
+) -> list[ScheduledPost]:
+    """List a chat's active scheduled posts (soonest first)."""
+    result = await session.execute(
+        select(ScheduledPost)
+        .where(ScheduledPost.chat_id == chat_id, ScheduledPost.enabled.is_(True))
+        .order_by(ScheduledPost.run_at)
+    )
+    return list(result.scalars().all())
+
+
+async def count_scheduled_posts(session: AsyncSession, chat_id: int) -> int:
+    """Count a chat's active scheduled posts (for the per-chat limit)."""
+    result = await session.execute(
+        select(func.count())
+        .select_from(ScheduledPost)
+        .where(ScheduledPost.chat_id == chat_id, ScheduledPost.enabled.is_(True))
+    )
+    return int(result.scalar_one())
+
+
+async def remove_scheduled_post(
+    session: AsyncSession, chat_id: int, post_id: int
+) -> bool:
+    """Delete a scheduled post by id within a chat. False if not found."""
+    result = await session.execute(
+        delete(ScheduledPost).where(
+            ScheduledPost.id == post_id, ScheduledPost.chat_id == chat_id
+        )
+    )
+    return bool(result.rowcount)
+
+
+async def due_scheduled_posts(
+    session: AsyncSession, now: datetime, limit: int = 100
+) -> list[ScheduledPost]:
+    """Return enabled posts whose run time has arrived (locked FOR UPDATE).
+
+    ``SKIP LOCKED`` lets multiple worker instances coexist without double-posting
+    the same row.
+    """
+    result = await session.execute(
+        select(ScheduledPost)
+        .where(
+            ScheduledPost.enabled.is_(True),
+            ScheduledPost.run_at <= now,
+        )
+        .order_by(ScheduledPost.run_at)
+        .limit(limit)
+        .with_for_update(skip_locked=True)
+    )
+    return list(result.scalars().all())
+
+
+async def mark_post_ran(
+    session: AsyncSession,
+    post: ScheduledPost,
+    now: datetime,
+    next_run_at: datetime | None,
+) -> None:
+    """Advance a post after firing: reschedule if recurring, else disable."""
+    post.last_run_at = now
+    if next_run_at is None:
+        post.enabled = False
+    else:
+        post.run_at = next_run_at
+    await session.flush()
 
 
 # --------------------------------------------------------------------------- #

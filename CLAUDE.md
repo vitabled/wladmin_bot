@@ -8,6 +8,7 @@
 ✅ **Phase 2 Complete** — Anti-flood (per-window counter) + media restrictions for newbies; ☰ command menu (`set_my_commands`).
 ✅ **Phase 3 Complete** — Custom triggers / auto-replies (contains/exact/starts matching, per-chat, cached).
 ✅ **Phase 4 Complete** — Per-user activity stats + leaderboards (`/stats`, `/top`), opt-out per chat.
+✅ **Phase 5 Complete** — Scheduled posting (one-off + recurring) via an in-process asyncio worker.
 
 ## Architecture
 
@@ -30,6 +31,7 @@
 - `bot/services/antiflood.py` — Flood predicate + newbie restricted-media check (Phase 2)
 - `bot/services/triggers.py` — Trigger matching (contains/exact/starts), ReDoS-safe (Phase 3)
 - `bot/services/stats.py` — Percentage/medal/clamp helpers for activity reports (Phase 4)
+- `bot/services/scheduler.py` — is_due / next_run timing logic for scheduled posts (Phase 5)
 - `bot/services/warns.py` — Warn counting and action triggers
 - `bot/services/captcha.py` — Math/emoji/button captcha generation
 - `bot/services/moderation.py` — Duration parsing, unban date calculation
@@ -44,6 +46,8 @@
 - `bot/handlers/antiflood.py` — Anti-flood + newbie-media guards, called from the per-message handler (Phase 2)
 - `bot/handlers/triggers.py` — Trigger auto-replies, called from the per-message handler after antispam (Phase 3)
 - `bot/handlers/stats.py` — /stats, /top commands + record_activity hook (Phase 4)
+- `bot/handlers/schedule.py` — /schedule, /schedules, /unschedule commands (Phase 5)
+- `bot/scheduler.py` — background worker loop posting due messages (Phase 5)
 - `bot/commands.py` — Registers the ☰ command menu (`set_my_commands`) on startup
 - `bot/handlers/actions.py` — Reusable moderation actions (ban/mute/kick/warn)
 - `bot/filters/is_admin.py` — Admin/owner check filter
@@ -65,7 +69,7 @@
 - `bot/utils/targets.py` — Resolve moderation target (reply/mention/id/@username)
 - `bot/utils/tasks.py` — Background task registry (captcha timeout, delayed delete)
 
-### Testing (186 tests)
+### Testing (204 tests)
 - `tests/test_antispam.py` — Antispam detection (service)
 - `tests/test_antiflood.py` — Anti-flood / newbie-media predicates (service)
 - `tests/test_handlers_antiflood.py` — Flood/newbie guards + /antiflood /newbie commands
@@ -73,6 +77,8 @@
 - `tests/test_handlers_triggers.py` — Auto-reply guard + /addtrigger /deltrigger /triggers
 - `tests/test_stats.py` — Statistics helpers (service)
 - `tests/test_handlers_stats.py` — record_activity + /stats /top
+- `tests/test_scheduler.py` — is_due / next_run timing (service)
+- `tests/test_handlers_schedule.py` — /schedule /schedules /unschedule + worker tick
 - `tests/test_commands.py` — ☰ command-menu registration
 - `tests/test_warns.py` — Warn system logic (service)
 - `tests/test_captcha.py` — Captcha generation/verification (service)
@@ -152,7 +158,7 @@ make revision m="add field"                     # autogenerate a new migration
 - ✅ **Phase 3**: Custom filters, triggers, auto-replies — **done**
 - ✅ **Phase 4**: User statistics, activity reports — **done**
 - **Phase 4**: User statistics, activity reports
-- **Phase 5**: Scheduled posting
+- ✅ **Phase 5**: Scheduled posting — **done**
 - **Phase 6**: Settings via private menu (inline buttons)
 - **Phase 7**: Web dashboard (OAuth Telegram Login)
 - **Phase 8**: Federated groups

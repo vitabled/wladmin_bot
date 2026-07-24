@@ -93,6 +93,15 @@ TRIGGER_SEPARATOR: Final = "|"
 TOP_DEFAULT: Final = 10
 TOP_MAX: Final = 25
 
+# --- Scheduled posting (Phase 5) ----------------------------------------
+SCHEDULE_MAX_PER_CHAT: Final = 50
+# Minimum recurring interval (seconds) — avoids hammering a chat.
+SCHEDULE_MIN_INTERVAL: Final = 300
+# How often the background worker scans for due posts (seconds).
+SCHEDULER_TICK_SECONDS: Final = 60
+# Preview length of a post's text in listings.
+SCHEDULE_PREVIEW_LEN: Final = 50
+
 # --- Default welcome text placeholders ----------------------------------
 DEFAULT_WELCOME_TEXT: Final = "{mention}, добро пожаловать в {chat_title}!"
 
