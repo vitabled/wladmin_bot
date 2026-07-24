@@ -88,17 +88,12 @@ services:
     image: alpine:3.20
     volumes:
       - certbot_conf:/etc/letsencrypt
+    # Single-line command: a folded (>) block preserved newlines inside the
+    # openssl args and broke it, so keep this on ONE line.
     command:
       - sh
       - -c
-      - >
-        D=/etc/letsencrypt/live/${DOMAIN:-panel.localhost};
-        test -f "$$D/fullchain.pem" ||
-        { apk add --no-cache openssl >/dev/null &&
-          mkdir -p "$$D" &&
-          openssl req -x509 -nodes -newkey rsa:2048 -days 365
-          -keyout "$$D/privkey.pem" -out "$$D/fullchain.pem"
-          -subj "/CN=${DOMAIN:-panel.localhost}"; }
+      - "D=/etc/letsencrypt/live/${DOMAIN:-panel.localhost}; [ -f $$D/fullchain.pem ] || { apk add --no-cache openssl && mkdir -p $$D && openssl req -x509 -nodes -newkey rsa:2048 -days 365 -keyout $$D/privkey.pem -out $$D/fullchain.pem -subj /CN=${DOMAIN:-panel.localhost}; }"
 
   # Reverse proxy: :80 (ACME + redirect) and :443 (TLS). Single domain, path
   # routing: /webhook → bot:8000, everything else → dashboard:8080.
