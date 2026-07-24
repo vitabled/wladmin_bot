@@ -230,6 +230,59 @@ class ScheduledPost(Base):
     )
 
 
+class Federation(Base):
+    """A named group of chats sharing a ban list (Phase 8)."""
+
+    __tablename__ = "federations"
+    __table_args__ = (UniqueConstraint("name", name="uq_federations_name"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(32))
+    owner_id: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class FederationChat(Base):
+    """Membership of a chat in a federation (a chat joins at most one)."""
+
+    __tablename__ = "federation_chats"
+    __table_args__ = (UniqueConstraint("chat_id", name="uq_federation_chats_chat"),)
+
+    federation_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("federations.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    chat_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("chats.chat_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class FederationBan(Base):
+    """A user banned across every chat in a federation."""
+
+    __tablename__ = "federation_bans"
+
+    federation_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("federations.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    banned_by: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class ModLog(Base):
     __tablename__ = "mod_log"
     __table_args__ = (Index("ix_mod_log_chat_created", "chat_id", "created_at"),)

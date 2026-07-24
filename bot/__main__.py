@@ -19,6 +19,7 @@ from bot.handlers import (
     antispam,
     captcha,
     common,
+    federation,
     menu,
     moderation,
     schedule,
@@ -68,6 +69,7 @@ def build_dispatcher(
     dp.include_router(moderation.router)
     dp.include_router(stats.router)
     dp.include_router(schedule.router)
+    dp.include_router(federation.router)
     dp.include_router(captcha.router)
     dp.include_router(welcome.router)
     dp.include_router(antispam.router)

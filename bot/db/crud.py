@@ -23,6 +23,9 @@ from bot.db.models import (
     Activity,
     Chat,
     ChatSettings,
+    Federation,
+    FederationBan,
+    FederationChat,
     ModLog,
     ScheduledPost,
     Stopword,
@@ -556,6 +559,132 @@ async def mark_post_ran(
     else:
         post.run_at = next_run_at
     await session.flush()
+
+
+# --------------------------------------------------------------------------- #
+# Federations (Phase 8)
+# --------------------------------------------------------------------------- #
+async def create_federation(
+    session: AsyncSession, name: str, owner_id: int
+) -> Federation | None:
+    """Create a federation; None if the name is already taken."""
+    existing = await session.execute(select(Federation).where(Federation.name == name))
+    if existing.scalar_one_or_none() is not None:
+        return None
+    fed = Federation(name=name, owner_id=owner_id)
+    session.add(fed)
+    await session.flush()
+    return fed
+
+
+async def get_federation(session: AsyncSession, fed_id: int) -> Federation | None:
+    """Fetch a federation by id."""
+    return await session.get(Federation, fed_id)
+
+
+async def get_chat_federation(session: AsyncSession, chat_id: int) -> Federation | None:
+    """Return the federation a chat belongs to, or None."""
+    result = await session.execute(
+        select(Federation)
+        .join(FederationChat, FederationChat.federation_id == Federation.id)
+        .where(FederationChat.chat_id == chat_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def add_chat_to_federation(
+    session: AsyncSession, fed_id: int, chat_id: int
+) -> bool:
+    """Link a chat to a federation; False if it already belongs to one."""
+    stmt = (
+        pg_insert(FederationChat)
+        .values(federation_id=fed_id, chat_id=chat_id)
+        .on_conflict_do_nothing(constraint="uq_federation_chats_chat")
+    )
+    result = await session.execute(stmt)
+    return bool(result.rowcount)
+
+
+async def remove_chat_from_federation(session: AsyncSession, chat_id: int) -> bool:
+    """Unlink a chat from its federation. False if it wasn't in one."""
+    result = await session.execute(
+        delete(FederationChat).where(FederationChat.chat_id == chat_id)
+    )
+    return bool(result.rowcount)
+
+
+async def list_federation_chats(session: AsyncSession, fed_id: int) -> list[int]:
+    """Return the chat ids belonging to a federation."""
+    result = await session.execute(
+        select(FederationChat.chat_id).where(FederationChat.federation_id == fed_id)
+    )
+    return [int(cid) for cid in result.scalars().all()]
+
+
+async def count_federation_chats(session: AsyncSession, fed_id: int) -> int:
+    """Count chats in a federation."""
+    result = await session.execute(
+        select(func.count())
+        .select_from(FederationChat)
+        .where(FederationChat.federation_id == fed_id)
+    )
+    return int(result.scalar_one())
+
+
+async def add_fedban(
+    session: AsyncSession,
+    fed_id: int,
+    user_id: int,
+    reason: str | None,
+    banned_by: int,
+) -> bool:
+    """Record a federation ban; False if already banned."""
+    stmt = (
+        pg_insert(FederationBan)
+        .values(
+            federation_id=fed_id,
+            user_id=user_id,
+            reason=reason,
+            banned_by=banned_by,
+        )
+        .on_conflict_do_nothing(
+            index_elements=[FederationBan.federation_id, FederationBan.user_id]
+        )
+    )
+    result = await session.execute(stmt)
+    return bool(result.rowcount)
+
+
+async def remove_fedban(session: AsyncSession, fed_id: int, user_id: int) -> bool:
+    """Remove a federation ban. False if it wasn't banned."""
+    result = await session.execute(
+        delete(FederationBan).where(
+            FederationBan.federation_id == fed_id,
+            FederationBan.user_id == user_id,
+        )
+    )
+    return bool(result.rowcount)
+
+
+async def is_fedbanned(session: AsyncSession, fed_id: int, user_id: int) -> bool:
+    """True if the user is federation-banned."""
+    result = await session.execute(
+        select(FederationBan.user_id).where(
+            FederationBan.federation_id == fed_id,
+            FederationBan.user_id == user_id,
+        )
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def count_fedbans(session: AsyncSession, fed_id: int) -> int:
+    """Count federation bans."""
+    result = await session.execute(
+        select(func.count())
+        .select_from(FederationBan)
+        .where(FederationBan.federation_id == fed_id)
+    )
+    return int(result.scalar_one())
 
 
 # --------------------------------------------------------------------------- #

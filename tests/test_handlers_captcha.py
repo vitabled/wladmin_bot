@@ -19,6 +19,8 @@ def patch_captcha(monkeypatch):
     monkeypatch.setattr(captcha, "send_welcome", AsyncMock())
     monkeypatch.setattr(captcha, "_start_captcha", AsyncMock())
     monkeypatch.setattr(crud, "upsert_user", AsyncMock())
+    # Phase 8: no federation by default, so the on-join fed-ban check is skipped.
+    monkeypatch.setattr(crud, "get_chat_federation", AsyncMock(return_value=None))
 
 
 async def test_wrong_user_cannot_solve(base_data):
@@ -86,6 +88,23 @@ async def test_new_member_welcome_when_captcha_disabled(base_data):
     await captcha.on_new_members(msg, **base_data)
     captcha.send_welcome.assert_awaited_once()
     captcha._start_captcha.assert_not_awaited()
+
+
+async def test_fedbanned_member_banned_on_join(base_data, monkeypatch):
+    from types import SimpleNamespace
+
+    base_data["settings"]["captcha_enabled"] = True
+    monkeypatch.setattr(
+        crud, "get_chat_federation", AsyncMock(return_value=SimpleNamespace(id=5))
+    )
+    monkeypatch.setattr(crud, "is_fedbanned", AsyncMock(return_value=True))
+    monkeypatch.setattr(captcha, "safe_ban_member", AsyncMock(return_value=True))
+    newbie = make_user(500, "Banned", "banned")
+    msg = make_message(new_chat_members=[newbie])
+    await captcha.on_new_members(msg, **base_data)
+    captcha.safe_ban_member.assert_awaited_once()
+    captcha._start_captcha.assert_not_awaited()
+    captcha.send_welcome.assert_not_awaited()
 
 
 async def test_new_member_bot_ignored(base_data):

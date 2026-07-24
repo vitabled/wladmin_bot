@@ -45,6 +45,7 @@ _ADMIN: list[tuple[str, dict[str, str]]] = [
     ("newbie", {"en": "Restrict newbie media", "ru": "Медиа новичков"}),
     ("stopwords", {"en": "List stopwords", "ru": "Стоп-слова"}),
     ("schedules", {"en": "Scheduled posts", "ru": "Отложенные посты"}),
+    ("finfo", {"en": "Federation info", "ru": "О федерации"}),
 ]
 
 _LANGS = ("en", "ru")

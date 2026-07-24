@@ -1,7 +1,7 @@
 {
   "cmd_start": "👋 Привет! Я бот-администратор для Telegram-групп.\n\nДобавьте меня в группу и дайте права администратора. Возможности:\n• Модерация: /ban /kick /mute /warn\n• Капча для новых участников\n• Антиспам: ссылки, пересланные, стоп-слова\n• Настраиваемые приветствия\n\n/help — список команд.",
   "cmd_help_private": "📚 Команды:\n/start — приветствие\n/help — эта справка\n\nДобавьте меня в группу и используйте /help там, чтобы увидеть команды модерации (доступны админам).",
-  "cmd_help_group": "📚 Команды модерации (только для админов):\n\n/ban [срок] [причина] — забанить\n/unban — разбанить\n/kick — выгнать без бана\n/mute [срок] [причина] — замутить\n/unmute — размутить\n/warn [причина] — предупреждение\n/unwarn — снять последнее предупреждение\n/warns — показать предупреждения\n\n⚙️ Настройки:\n/settings — текущие настройки\n/menu — меню настроек кнопками\n/welcome on|off, /setwelcome <текст>\n/captcha on|off, /setcaptcha button|math|emoji\n/setwarnlimit <N>, /setwarnaction mute|kick|ban [срок]\n/antispam links|forwards|stopwords on|off\n/antiflood on|off | <лимит> <окно> [mute|kick|ban]\n/newbie on|off | <секунды>\n/addstop <слово>, /delstop <слово>, /stopwords\n/addtrigger <фраза> | <ответ>, /deltrigger <фраза>, /triggers [on|off]\n\n📊 Статистика:\n/stats [on|off] — моя статистика / вкл-выкл учёта\n/top [N] — самые активные\n\n🗓 Отложенные посты:\n/schedule <через> [<интервал>] | <текст>\n/schedules — список, /unschedule <id>",
+  "cmd_help_group": "📚 Команды модерации (только для админов):\n\n/ban [срок] [причина] — забанить\n/unban — разбанить\n/kick — выгнать без бана\n/mute [срок] [причина] — замутить\n/unmute — размутить\n/warn [причина] — предупреждение\n/unwarn — снять последнее предупреждение\n/warns — показать предупреждения\n\n⚙️ Настройки:\n/settings — текущие настройки\n/menu — меню настроек кнопками\n/welcome on|off, /setwelcome <текст>\n/captcha on|off, /setcaptcha button|math|emoji\n/setwarnlimit <N>, /setwarnaction mute|kick|ban [срок]\n/antispam links|forwards|stopwords on|off\n/antiflood on|off | <лимит> <окно> [mute|kick|ban]\n/newbie on|off | <секунды>\n/addstop <слово>, /delstop <слово>, /stopwords\n/addtrigger <фраза> | <ответ>, /deltrigger <фраза>, /triggers [on|off]\n\n📊 Статистика:\n/stats [on|off] — моя статистика / вкл-выкл учёта\n/top [N] — самые активные\n\n🗓 Отложенные посты:\n/schedule <через> [<интервал>] | <текст>\n/schedules — список, /unschedule <id>\n\n🌐 Федерация (общие баны):\n/fcreate <имя>, /fjoin <id>, /fleave, /finfo\n/fban <кто> [причина], /funban <кто>",
   "error_not_admin": "❌ Эту команду могут использовать только администраторы.",
   "error_bot_not_admin": "❌ Я не администратор в этом чате или мне не хватает прав.",
   "error_bot_cant_restrict": "❌ У меня нет права ограничивать участников.",
@@ -114,5 +114,21 @@
   "menu_triggers": "Триггеры",
   "menu_stats": "Статистика",
   "menu_close": "✖ Закрыть",
-  "menu_saved": "Сохранено ✅"
+  "menu_saved": "Сохранено ✅",
+  "fed_name_invalid": "❌ Имя федерации: 3–32 символа (буквы, цифры, пробел, -, _).",
+  "fed_name_taken": "ℹ️ Федерация с таким именем уже есть.",
+  "fed_created": "✅ Федерация «{name}» создана. ID: {id}. Привяжите чаты через /fjoin {id}.",
+  "fed_join_usage": "❌ Использование: /fjoin <id федерации>.",
+  "fed_not_found": "❌ Федерация не найдена.",
+  "fed_join_forbidden": "❌ Привязать чат может только владелец федерации.",
+  "fed_already_joined": "ℹ️ Этот чат уже состоит в федерации.",
+  "fed_joined": "✅ Чат присоединён к федерации «{name}».",
+  "fed_left": "✅ Чат отвязан от федерации.",
+  "fed_not_in": "ℹ️ Этот чат не состоит в федерации.",
+  "fed_info": "🌐 Федерация «{name}» (ID {id}):\n• чатов: {chats}\n• банов: {bans}",
+  "fed_cannot_ban": "❌ Нельзя фед-банить этого пользователя.",
+  "fed_already_banned": "ℹ️ {user} уже в фед-бане.",
+  "fed_banned": "🚫 {user} забанен в федерации «{name}» (чатов: {count}).",
+  "fed_not_banned": "ℹ️ {user} не в фед-бане.",
+  "fed_unbanned": "🔓 {user} разбанен в федерации «{name}»."
 }

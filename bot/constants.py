@@ -102,6 +102,10 @@ SCHEDULER_TICK_SECONDS: Final = 60
 # Preview length of a post's text in listings.
 SCHEDULE_PREVIEW_LEN: Final = 50
 
+# --- Federation (Phase 8) -----------------------------------------------
+FED_NAME_MIN: Final = 3
+FED_NAME_MAX: Final = 32
+
 # --- Default welcome text placeholders ----------------------------------
 DEFAULT_WELCOME_TEXT: Final = "{mention}, добро пожаловать в {chat_title}!"
 

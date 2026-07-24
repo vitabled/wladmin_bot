@@ -11,6 +11,7 @@
 ✅ **Phase 5 Complete** — Scheduled posting (one-off + recurring) via an in-process asyncio worker.
 ✅ **Phase 6 Complete** — Inline settings menu (`/menu`): toggle features with callback buttons.
 ✅ **Phase 7 Complete** — FastAPI web dashboard with Telegram-login auth; per-chat settings + activity.
+✅ **Phase 8 Complete** — Federated groups: shared ban lists propagated across member chats.
 
 ## Architecture
 
@@ -34,6 +35,7 @@
 - `bot/services/triggers.py` — Trigger matching (contains/exact/starts), ReDoS-safe (Phase 3)
 - `bot/services/stats.py` — Percentage/medal/clamp helpers for activity reports (Phase 4)
 - `bot/services/scheduler.py` — is_due / next_run timing logic for scheduled posts (Phase 5)
+- `bot/services/federation.py` — federation name normalize/validate (Phase 8)
 - `bot/services/warns.py` — Warn counting and action triggers
 - `bot/services/captcha.py` — Math/emoji/button captcha generation
 - `bot/services/moderation.py` — Duration parsing, unban date calculation
@@ -50,6 +52,7 @@
 - `bot/handlers/stats.py` — /stats, /top commands + record_activity hook (Phase 4)
 - `bot/handlers/schedule.py` — /schedule, /schedules, /unschedule commands (Phase 5)
 - `bot/handlers/menu.py` — /menu inline settings toggles via callback_query (Phase 6)
+- `bot/handlers/federation.py` — /fcreate /fjoin /fleave /fban /funban /finfo (Phase 8); fed-bans enforced on join in captcha handler
 
 ### Web dashboard (Phase 7)
 - `bot/web/auth.py` — Telegram Login hash verification (HMAC-SHA256, pure)
@@ -77,7 +80,7 @@
 - `bot/utils/targets.py` — Resolve moderation target (reply/mention/id/@username)
 - `bot/utils/tasks.py` — Background task registry (captcha timeout, delayed delete)
 
-### Testing (227 tests)
+### Testing (248 tests)
 - `tests/test_antispam.py` — Antispam detection (service)
 - `tests/test_antiflood.py` — Anti-flood / newbie-media predicates (service)
 - `tests/test_handlers_antiflood.py` — Flood/newbie guards + /antiflood /newbie commands
@@ -90,6 +93,8 @@
 - `tests/test_handlers_menu.py` — inline menu keyboard + toggle callbacks
 - `tests/test_web_auth.py` — Telegram Login signature/freshness verification
 - `tests/test_web_app.py` — dashboard routes (auth, access control, toggle) via TestClient
+- `tests/test_federation.py` — federation name normalize/validate (service)
+- `tests/test_handlers_federation.py` — /fcreate /fjoin /fban /funban + cross-chat propagation
 - `tests/test_commands.py` — ☰ command-menu registration
 - `tests/test_warns.py` — Warn system logic (service)
 - `tests/test_captcha.py` — Captcha generation/verification (service)
@@ -172,7 +177,7 @@ make revision m="add field"                     # autogenerate a new migration
 - ✅ **Phase 5**: Scheduled posting — **done**
 - ✅ **Phase 6**: Settings via inline menu (buttons) — **done**
 - ✅ **Phase 7**: Web dashboard (Telegram Login) — **done**
-- **Phase 8**: Federated groups
+- ✅ **Phase 8**: Federated groups — **done**
 
 ## Environment Variables
 

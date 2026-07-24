@@ -203,10 +203,18 @@ async def on_new_members(message: types.Message, **data: Any) -> None:
     if settings.get("delete_service_messages"):
         await safe_delete_message(bot, chat.id, message.message_id)
 
+    # Phase 8: federation bans are enforced on join for this chat's federation.
+    federation = await crud.get_chat_federation(session, chat.id)
+
     for user in message.new_chat_members or []:
         if user.is_bot:
             continue
         await crud.upsert_user(session, user.id, user.first_name, user.username)
+        if federation is not None and await crud.is_fedbanned(
+            session, federation.id, user.id
+        ):
+            await safe_ban_member(bot, chat.id, user.id)
+            continue
         if settings.get("newbie_media_enabled"):
             await redis.mark_newbie(
                 chat.id, user.id, int(settings.get("newbie_period") or 3600)

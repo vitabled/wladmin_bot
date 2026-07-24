@@ -1,7 +1,7 @@
 {
   "cmd_start": "👋 Hi! I'm a group administration bot for Telegram.\n\nAdd me to a group and grant admin rights. Features:\n• Moderation: /ban /kick /mute /warn\n• Captcha for new members\n• Antispam: links, forwards, stopwords\n• Customizable welcome messages\n\n/help — command list.",
   "cmd_help_private": "📚 Commands:\n/start — welcome\n/help — this help\n\nAdd me to a group and use /help there to see moderation commands (admins only).",
-  "cmd_help_group": "📚 Moderation commands (admins only):\n\n/ban [duration] [reason] — ban\n/unban — unban\n/kick — remove without ban\n/mute [duration] [reason] — mute\n/unmute — unmute\n/warn [reason] — warn\n/unwarn — remove last warning\n/warns — show warnings\n\n⚙️ Settings:\n/settings — current settings\n/menu — settings menu with buttons\n/welcome on|off, /setwelcome <text>\n/captcha on|off, /setcaptcha button|math|emoji\n/setwarnlimit <N>, /setwarnaction mute|kick|ban [duration]\n/antispam links|forwards|stopwords on|off\n/antiflood on|off | <limit> <window> [mute|kick|ban]\n/newbie on|off | <seconds>\n/addstop <word>, /delstop <word>, /stopwords\n/addtrigger <phrase> | <reply>, /deltrigger <phrase>, /triggers [on|off]\n\n📊 Statistics:\n/stats [on|off] — my stats / toggle tracking\n/top [N] — most active users\n\n🗓 Scheduled posts:\n/schedule <in> [<interval>] | <text>\n/schedules — list, /unschedule <id>",
+  "cmd_help_group": "📚 Moderation commands (admins only):\n\n/ban [duration] [reason] — ban\n/unban — unban\n/kick — remove without ban\n/mute [duration] [reason] — mute\n/unmute — unmute\n/warn [reason] — warn\n/unwarn — remove last warning\n/warns — show warnings\n\n⚙️ Settings:\n/settings — current settings\n/menu — settings menu with buttons\n/welcome on|off, /setwelcome <text>\n/captcha on|off, /setcaptcha button|math|emoji\n/setwarnlimit <N>, /setwarnaction mute|kick|ban [duration]\n/antispam links|forwards|stopwords on|off\n/antiflood on|off | <limit> <window> [mute|kick|ban]\n/newbie on|off | <seconds>\n/addstop <word>, /delstop <word>, /stopwords\n/addtrigger <phrase> | <reply>, /deltrigger <phrase>, /triggers [on|off]\n\n📊 Statistics:\n/stats [on|off] — my stats / toggle tracking\n/top [N] — most active users\n\n🗓 Scheduled posts:\n/schedule <in> [<interval>] | <text>\n/schedules — list, /unschedule <id>\n\n🌐 Federation (shared bans):\n/fcreate <name>, /fjoin <id>, /fleave, /finfo\n/fban <who> [reason], /funban <who>",
   "error_not_admin": "❌ Only administrators can use this command.",
   "error_bot_not_admin": "❌ I'm not an admin in this chat or I lack permissions.",
   "error_bot_cant_restrict": "❌ I don't have the right to restrict members.",
@@ -114,5 +114,21 @@
   "menu_triggers": "Triggers",
   "menu_stats": "Statistics",
   "menu_close": "✖ Close",
-  "menu_saved": "Saved ✅"
+  "menu_saved": "Saved ✅",
+  "fed_name_invalid": "❌ Federation name: 3–32 chars (letters, digits, space, -, _).",
+  "fed_name_taken": "ℹ️ A federation with that name already exists.",
+  "fed_created": "✅ Federation “{name}” created. ID: {id}. Attach chats with /fjoin {id}.",
+  "fed_join_usage": "❌ Usage: /fjoin <federation id>.",
+  "fed_not_found": "❌ Federation not found.",
+  "fed_join_forbidden": "❌ Only the federation owner can attach a chat.",
+  "fed_already_joined": "ℹ️ This chat already belongs to a federation.",
+  "fed_joined": "✅ Chat joined federation “{name}”.",
+  "fed_left": "✅ Chat detached from its federation.",
+  "fed_not_in": "ℹ️ This chat is not in a federation.",
+  "fed_info": "🌐 Federation “{name}” (ID {id}):\n• chats: {chats}\n• bans: {bans}",
+  "fed_cannot_ban": "❌ Cannot federation-ban this user.",
+  "fed_already_banned": "ℹ️ {user} is already federation-banned.",
+  "fed_banned": "🚫 {user} banned across federation “{name}” ({count} chats).",
+  "fed_not_banned": "ℹ️ {user} is not federation-banned.",
+  "fed_unbanned": "🔓 {user} unbanned across federation “{name}”."
 }
