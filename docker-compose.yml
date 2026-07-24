@@ -72,6 +72,8 @@ services:
       WEB_PORT: 8080
       WEB_BOT_USERNAME: ${WEB_BOT_USERNAME:-}
       WEB_SESSION_SECRET: ${WEB_SESSION_SECRET:-}
+      # LOCAL ONLY: set to 1 to enable /dev-login (no Telegram/domain needed).
+      WEB_DEV_LOGIN: ${WEB_DEV_LOGIN:-0}
     ports:
       - "${WEB_PORT:-8080}:8080"
     depends_on:

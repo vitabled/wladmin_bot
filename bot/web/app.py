@@ -96,9 +96,23 @@ def create_app(settings: Any, session_maker: Any, redis: Any) -> FastAPI:
                 "<p><em>Set WEB_BOT_USERNAME to enable the Telegram login "
                 "button.</em></p>"
             )
+        if getattr(settings, "WEB_DEV_LOGIN", False):
+            widget += (
+                "<p style='margin-top:1rem'><a href='/dev-login'>"
+                "🔓 Dev login (local only)</a></p>"
+            )
         return HTMLResponse(
             _page("Login", f"<h1>Bot Dashboard</h1><p>Sign in:</p>{widget}")
         )
+
+    if getattr(settings, "WEB_DEV_LOGIN", False):
+
+        @app.get("/dev-login")
+        async def dev_login(request: Request) -> Any:
+            """LOCAL DEV ONLY: sign in as OWNER_ID without Telegram."""
+            request.session["user_id"] = settings.OWNER_ID
+            request.session["name"] = "dev"
+            return RedirectResponse("/chats", status_code=303)
 
     @app.get("/auth/telegram")
     async def auth(request: Request) -> Any:

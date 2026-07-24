@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     WEB_BOT_USERNAME: str = ""
     # Signing key for the dashboard session cookie; falls back to WEBHOOK_SECRET.
     WEB_SESSION_SECRET: str = ""
+    # LOCAL DEV ONLY: enable /dev-login to sign in as OWNER_ID without Telegram
+    # (needed to try the dashboard without a domain). NEVER enable in production.
+    WEB_DEV_LOGIN: bool = False
 
     @field_validator("WEBHOOK_PATH")
     @classmethod

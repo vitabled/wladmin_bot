@@ -80,7 +80,7 @@
 - `bot/utils/targets.py` — Resolve moderation target (reply/mention/id/@username)
 - `bot/utils/tasks.py` — Background task registry (captcha timeout, delayed delete)
 
-### Testing (248 tests)
+### Testing (250 tests)
 - `tests/test_antispam.py` — Antispam detection (service)
 - `tests/test_antiflood.py` — Anti-flood / newbie-media predicates (service)
 - `tests/test_handlers_antiflood.py` — Flood/newbie guards + /antiflood /newbie commands

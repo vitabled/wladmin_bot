@@ -11,13 +11,21 @@ from fastapi.testclient import TestClient
 from bot.db import crud
 from bot.web.app import create_app
 
-_SETTINGS = SimpleNamespace(
-    TELEGRAM_BOT_TOKEN="123:abc",
-    OWNER_ID=999,
-    WEB_BOT_USERNAME="mybot",
-    WEB_SESSION_SECRET="test-secret",
-    WEBHOOK_SECRET="wh",
-)
+
+def _settings(**overrides):
+    base = dict(
+        TELEGRAM_BOT_TOKEN="123:abc",
+        OWNER_ID=999,
+        WEB_BOT_USERNAME="mybot",
+        WEB_SESSION_SECRET="test-secret",
+        WEBHOOK_SECRET="wh",
+        WEB_DEV_LOGIN=False,
+    )
+    base.update(overrides)
+    return SimpleNamespace(**base)
+
+
+_SETTINGS = _settings()
 
 
 class _SessionCM:
@@ -140,3 +148,24 @@ def test_toggle_rejects_unknown_field(client, monkeypatch):
     )
     assert r.status_code == 403
     crud.update_settings.assert_not_awaited()
+
+
+# --------------------------------------------------------------------------- #
+# Dev login (local only)
+# --------------------------------------------------------------------------- #
+def test_dev_login_disabled_by_default(client):
+    r = client.get("/dev-login", follow_redirects=False)
+    assert r.status_code == 404
+
+
+def test_dev_login_signs_in_owner_when_enabled(redis, monkeypatch):
+    monkeypatch.setattr(crud, "list_active_chats", AsyncMock(return_value=[]))
+    session_maker = lambda: _SessionCM(AsyncMock())  # noqa: E731
+    app = create_app(_settings(WEB_DEV_LOGIN=True), session_maker, redis)
+    dev_client = TestClient(app)
+
+    r = dev_client.get("/dev-login", follow_redirects=False)
+    assert r.status_code == 303
+    # Session is now set → /chats is reachable (not redirected to /).
+    r2 = dev_client.get("/chats", follow_redirects=False)
+    assert r2.status_code == 200
