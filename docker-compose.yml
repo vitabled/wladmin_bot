@@ -82,6 +82,45 @@ services:
       redis:
         condition: service_healthy
 
+  # One-shot: generate a self-signed cert if none exists (local bring-up).
+  # For production, drop real certs into the nginx_certs volume (or run certbot).
+  nginx-init:
+    image: alpine:3.20
+    volumes:
+      - nginx_certs:/certs
+    command:
+      - sh
+      - -c
+      - >
+        test -f /certs/fullchain.pem ||
+        { apk add --no-cache openssl >/dev/null &&
+          openssl req -x509 -nodes -newkey rsa:2048 -days 365
+          -keyout /certs/privkey.pem -out /certs/fullchain.pem
+          -subj '/CN=localhost'; }
+
+  # Reverse proxy: :80 (ACME + redirect) and :443 (TLS) → bot webhook + dashboard.
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      WEBHOOK_DOMAIN: ${WEBHOOK_DOMAIN:-bot.localhost}
+      DASHBOARD_DOMAIN: ${DASHBOARD_DOMAIN:-panel.localhost}
+    volumes:
+      - ./docker/nginx/templates:/etc/nginx/templates:ro
+      - nginx_certs:/etc/nginx/certs:ro
+      - certbot_www:/var/www/certbot
+    depends_on:
+      nginx-init:
+        condition: service_completed_successfully
+      bot:
+        condition: service_started
+      dashboard:
+        condition: service_started
+
 volumes:
   postgres_data:
   redis_data:
+  nginx_certs:
+  certbot_www:

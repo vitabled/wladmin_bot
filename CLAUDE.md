@@ -132,7 +132,13 @@
 ```bash
 docker-compose up
 ```
-Runs bot on `http://localhost:8000/webhook`, PostgreSQL, Redis.
+Runs bot (`:8000/webhook`), dashboard (`:8080`), PostgreSQL, Redis, and an
+nginx reverse proxy on `:80`/`:443`. nginx routes by hostname:
+`WEBHOOK_DOMAIN` → bot webhook, `DASHBOARD_DOMAIN` → dashboard (config in
+`docker/nginx/templates/`). Port 80 serves the ACME challenge and redirects to
+443; a self-signed cert is generated into the `nginx_certs` volume on first run
+(replace with real certs for production). To try the dashboard without a domain,
+set `WEB_DEV_LOGIN=1` and open `http://localhost:8080/dev-login`.
 
 ### Local Dev
 ```bash
