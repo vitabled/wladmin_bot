@@ -98,6 +98,32 @@ async def set_chat_active(session: AsyncSession, chat_id: int, is_active: bool) 
         chat.is_active = is_active
 
 
+async def get_chat(session: AsyncSession, chat_id: int) -> Chat | None:
+    """Fetch a chat row by id (or None)."""
+    return await session.get(Chat, chat_id)
+
+
+async def list_active_chats(session: AsyncSession) -> list[Chat]:
+    """List active chats (for the web dashboard), alphabetical by title."""
+    result = await session.execute(
+        select(Chat).where(Chat.is_active.is_(True)).order_by(Chat.title)
+    )
+    return list(result.scalars().all())
+
+
+async def recent_mod_logs(
+    session: AsyncSession, chat_id: int, limit: int = 20
+) -> list[ModLog]:
+    """Return a chat's most recent moderation-log entries (newest first)."""
+    result = await session.execute(
+        select(ModLog)
+        .where(ModLog.chat_id == chat_id)
+        .order_by(ModLog.created_at.desc(), ModLog.id.desc())
+        .limit(limit)
+    )
+    return list(result.scalars().all())
+
+
 async def get_or_create_settings(session: AsyncSession, chat_id: int) -> ChatSettings:
     """Return chat settings, creating a defaults row if missing.
 

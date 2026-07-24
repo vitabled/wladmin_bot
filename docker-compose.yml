@@ -56,6 +56,30 @@ services:
       retries: 5
       start_period: 20s
 
+  # Web dashboard (Phase 7) — Telegram-login settings UI, shares DB/Redis.
+  dashboard:
+    build: .
+    command: ["python", "-m", "bot.web"]
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      WEBHOOK_URL: ${WEBHOOK_URL}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET}
+      OWNER_ID: ${OWNER_ID}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-telegram_bot}
+      REDIS_URL: redis://redis:6379/0
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      WEB_HOST: 0.0.0.0
+      WEB_PORT: 8080
+      WEB_BOT_USERNAME: ${WEB_BOT_USERNAME:-}
+      WEB_SESSION_SECRET: ${WEB_SESSION_SECRET:-}
+    ports:
+      - "${WEB_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   redis_data:

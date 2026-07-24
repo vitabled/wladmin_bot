@@ -17,3 +17,9 @@ redis==8.0.1
 
 # Logging
 structlog==26.1.0
+
+# Web dashboard (Phase 7)
+fastapi==0.121.2
+uvicorn==0.41.0
+python-multipart==0.0.20
+itsdangerous==2.2.0

@@ -10,6 +10,7 @@
 ✅ **Phase 4 Complete** — Per-user activity stats + leaderboards (`/stats`, `/top`), opt-out per chat.
 ✅ **Phase 5 Complete** — Scheduled posting (one-off + recurring) via an in-process asyncio worker.
 ✅ **Phase 6 Complete** — Inline settings menu (`/menu`): toggle features with callback buttons.
+✅ **Phase 7 Complete** — FastAPI web dashboard with Telegram-login auth; per-chat settings + activity.
 
 ## Architecture
 
@@ -49,6 +50,11 @@
 - `bot/handlers/stats.py` — /stats, /top commands + record_activity hook (Phase 4)
 - `bot/handlers/schedule.py` — /schedule, /schedules, /unschedule commands (Phase 5)
 - `bot/handlers/menu.py` — /menu inline settings toggles via callback_query (Phase 6)
+
+### Web dashboard (Phase 7)
+- `bot/web/auth.py` — Telegram Login hash verification (HMAC-SHA256, pure)
+- `bot/web/app.py` — FastAPI app: login, per-chat settings view/toggle, activity
+- `bot/web/__main__.py` — `python -m bot.web` entrypoint (uvicorn), own DB/Redis lifecycle
 - `bot/scheduler.py` — background worker loop posting due messages (Phase 5)
 - `bot/commands.py` — Registers the ☰ command menu (`set_my_commands`) on startup
 - `bot/handlers/actions.py` — Reusable moderation actions (ban/mute/kick/warn)
@@ -71,7 +77,7 @@
 - `bot/utils/targets.py` — Resolve moderation target (reply/mention/id/@username)
 - `bot/utils/tasks.py` — Background task registry (captcha timeout, delayed delete)
 
-### Testing (212 tests)
+### Testing (227 tests)
 - `tests/test_antispam.py` — Antispam detection (service)
 - `tests/test_antiflood.py` — Anti-flood / newbie-media predicates (service)
 - `tests/test_handlers_antiflood.py` — Flood/newbie guards + /antiflood /newbie commands
@@ -82,6 +88,8 @@
 - `tests/test_scheduler.py` — is_due / next_run timing (service)
 - `tests/test_handlers_schedule.py` — /schedule /schedules /unschedule + worker tick
 - `tests/test_handlers_menu.py` — inline menu keyboard + toggle callbacks
+- `tests/test_web_auth.py` — Telegram Login signature/freshness verification
+- `tests/test_web_app.py` — dashboard routes (auth, access control, toggle) via TestClient
 - `tests/test_commands.py` — ☰ command-menu registration
 - `tests/test_warns.py` — Warn system logic (service)
 - `tests/test_captcha.py` — Captcha generation/verification (service)
@@ -163,7 +171,7 @@ make revision m="add field"                     # autogenerate a new migration
 - **Phase 4**: User statistics, activity reports
 - ✅ **Phase 5**: Scheduled posting — **done**
 - ✅ **Phase 6**: Settings via inline menu (buttons) — **done**
-- **Phase 7**: Web dashboard (OAuth Telegram Login)
+- ✅ **Phase 7**: Web dashboard (Telegram Login) — **done**
 - **Phase 8**: Federated groups
 
 ## Environment Variables

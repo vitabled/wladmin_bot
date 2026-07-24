@@ -45,6 +45,14 @@ class Settings(BaseSettings):
     # --- Cache tuning ---
     SETTINGS_CACHE_TTL: int = Field(default=3600, ge=1)
 
+    # --- Web dashboard (Phase 7) ---
+    WEB_HOST: str = "0.0.0.0"
+    WEB_PORT: int = 8080
+    # Bot @username (no @) for the Telegram Login widget on the dashboard.
+    WEB_BOT_USERNAME: str = ""
+    # Signing key for the dashboard session cookie; falls back to WEBHOOK_SECRET.
+    WEB_SESSION_SECRET: str = ""
+
     @field_validator("WEBHOOK_PATH")
     @classmethod
     def _ensure_leading_slash(cls, v: str) -> str:
