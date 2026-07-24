@@ -133,9 +133,11 @@
 docker-compose up
 ```
 Runs bot (`:8000/webhook`), dashboard (`:8080`), PostgreSQL, Redis, an nginx
-reverse proxy on `:80`/`:443`, and certbot. **Single domain, path routing**
-(`docker/nginx/templates/`): `/webhook` (+ `/health`) → bot, everything else →
-dashboard. Port 80 serves the ACME challenge and redirects to 443. `nginx-init`
+reverse proxy on `:80`/`:443`, and certbot. The main config
+`docker/nginx/nginx.conf` is mounted read-only and centralizes the proxy targets
+(`upstream bot_backend`/`dashboard_backend`) + shared proxy headers. **Single
+domain, path routing** (server blocks in `docker/nginx/templates/`): `/webhook`
+(+ `/health`) → bot, everything else → dashboard. Port 80 serves the ACME challenge and redirects to 443. `nginx-init`
 seeds a self-signed cert at certbot's live path so nginx boots before a real
 cert exists; nginx reloads every 6h to pick up renewals.
 

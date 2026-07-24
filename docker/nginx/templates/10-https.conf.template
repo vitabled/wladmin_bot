@@ -1,6 +1,7 @@
-# :443 — single domain, path-based routing:
-#   /webhook (+ /health) → bot:8000 (Telegram webhook)
-#   everything else       → dashboard:8080 (web panel)
+# :443 — single domain, path-based routing (WHICH path goes WHERE).
+# Proxy targets (upstreams) and shared headers live in ../nginx.conf.
+#   /webhook (+ /health) → bot_backend      (Telegram webhook)
+#   everything else       → dashboard_backend (web panel)
 # Certs come from the certbot volume; a self-signed placeholder is seeded by
 # nginx-init so nginx can start before a real cert is issued.
 #
@@ -15,26 +16,18 @@ server {
 
     client_max_body_size 1m;
 
-    # --- proxy #1: bot webhook -------------------------------------------
+    # --- bot webhook -----------------------------------------------------
     location = /webhook {
-        proxy_pass http://bot:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_pass http://bot_backend;
     }
 
     location = /health {
-        proxy_pass http://bot:8000;
+        proxy_pass http://bot_backend;
     }
 
-    # --- proxy #2: web dashboard (catch-all) -----------------------------
+    # --- web dashboard (catch-all) ---------------------------------------
     location / {
-        proxy_pass http://dashboard:8080;
+        proxy_pass http://dashboard_backend;
         proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
