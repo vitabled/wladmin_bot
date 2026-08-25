@@ -44,7 +44,20 @@ class I18nMiddleware(BaseMiddleware):
         data["lang"] = lang
 
         def _(key: str, **kwargs: Any) -> str:
+            text = self.i18n.get(key, lang, **kwargs)
+            # Premium-эмодзи: <tg-emoji> теги (только если текст содержит глифы
+            # из таблицы; plain-эмодзи без премиум-варианта остаются как есть).
+            if lang == "ru":
+                from bot.emoji import decorate
+
+                return decorate(text) or text
+            return text
+
+        def _raw(key: str, **kwargs: Any) -> str:
+            """Перевод без premium-декорации — для кнопок/инлайн-текста,
+            где Telegram НЕ парсит HTML и теги <tg-emoji> показались бы сырыми."""
             return self.i18n.get(key, lang, **kwargs)
 
         data["_"] = _
+        data["_raw"] = _raw
         return await handler(event, data)

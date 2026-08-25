@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.db import crud
 from bot.filters.chat_type import IsGroup
+from bot.utils.text import escape_html
 from bot.services.federation import FederationService
 from bot.utils.targets import resolve_target
 from bot.utils.telegram import safe_ban_member, safe_unban_member
@@ -80,7 +81,7 @@ async def cmd_fjoin(
     if not added:
         await message.reply(_("fed_already_joined"))
         return
-    await message.reply(_("fed_joined", name=fed.name))
+    await message.reply(_("fed_joined", name=escape_html(fed.name)))
 
 
 @router.message(Command("fleave"))
@@ -108,7 +109,7 @@ async def cmd_finfo(
         return
     chats = await crud.count_federation_chats(session, fed.id)
     bans = await crud.count_fedbans(session, fed.id)
-    await message.reply(_("fed_info", name=fed.name, id=fed.id, chats=chats, bans=bans))
+    await message.reply(_("fed_info", name=escape_html(fed.name), id=fed.id, chats=chats, bans=bans))
 
 
 async def _resolve_for_fed(
@@ -151,7 +152,7 @@ async def cmd_fban(message: types.Message, command: CommandObject, **data: Any) 
     reason = " ".join(args[consumed:]).strip() or None
     added = await crud.add_fedban(session, fed.id, target.user_id, reason, actor)
     if not added:
-        await message.reply(_("fed_already_banned", user=target.name))
+        await message.reply(_("fed_already_banned", user=escape_html(target.name)))
         return
 
     await crud.add_mod_log(
@@ -161,7 +162,7 @@ async def cmd_fban(message: types.Message, command: CommandObject, **data: Any) 
     for chat_id in chat_ids:
         await safe_ban_member(bot, chat_id, target.user_id)
     await message.reply(
-        _("fed_banned", user=target.name, name=fed.name, count=len(chat_ids))
+        _("fed_banned", user=escape_html(target.name), name=escape_html(fed.name), count=len(chat_ids))
     )
 
 
@@ -179,7 +180,7 @@ async def cmd_funban(
     bot: Bot = message.bot
     removed = await crud.remove_fedban(session, fed.id, target.user_id)
     if not removed:
-        await message.reply(_("fed_not_banned", user=target.name))
+        await message.reply(_("fed_not_banned", user=escape_html(target.name)))
         return
 
     actor = message.from_user.id if message.from_user else 0
@@ -189,4 +190,4 @@ async def cmd_funban(
     chat_ids = await crud.list_federation_chats(session, fed.id)
     for chat_id in chat_ids:
         await safe_unban_member(bot, chat_id, target.user_id, only_if_banned=True)
-    await message.reply(_("fed_unbanned", user=target.name, name=fed.name))
+    await message.reply(_("fed_unbanned", user=escape_html(target.name), name=escape_html(fed.name)))
