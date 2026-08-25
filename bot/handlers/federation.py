@@ -20,10 +20,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.db import crud
 from bot.filters.chat_type import IsGroup
-from bot.utils.text import escape_html
 from bot.services.federation import FederationService
 from bot.utils.targets import resolve_target
 from bot.utils.telegram import safe_ban_member, safe_unban_member
+from bot.utils.text import escape_html
 
 logger = logging.getLogger(__name__)
 
