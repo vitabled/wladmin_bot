@@ -12,7 +12,7 @@ from bot.cache.redis import RedisClient
 from bot.constants import ACTION_BAN, ACTION_MUTE, ACTION_WARN
 from bot.db import crud
 from bot.filters.chat_type import IsGroup
-from bot.handlers import actions, antiflood, stats, triggers
+from bot.handlers import actions, antiflood, scam, stats, triggers
 from bot.services.antispam import AntispamService
 from bot.utils.telegram import safe_delete_message
 
@@ -132,6 +132,8 @@ async def on_message(message: types.Message, **data: Any) -> None:
     # Count activity + auto-reply only when the message survived moderation.
     if not acted:
         await stats.record_activity(message, data)
+        if await scam.maybe_warn_newbie(message, data):
+            return
         await triggers.maybe_reply(message, data)
 
 

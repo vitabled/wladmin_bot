@@ -111,7 +111,10 @@ SCAM_SOURCE_SCAM: Final = "scam"
 SCAM_SOURCE_VERIFIED: Final = "verified"
 SCAM_SOURCE_MANUAL: Final = "manual"
 # A join younger than this (days) is a /scam risk factor.
-SCAM_JOINED_RISK_DAYS: Final = 14
+SCAM_JOINED_RISK_DAYS: Final = 7
+# A member who joined younger than this (days) gets an automatic high-risk
+# warning on their first post in the chat.
+SCAM_AUTO_WARN_DAYS: Final = 1
 
 # --- Default welcome text placeholders ----------------------------------
 DEFAULT_WELCOME_TEXT: Final = "{mention}, добро пожаловать в {chat_title}!"

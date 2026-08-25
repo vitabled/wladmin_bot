@@ -134,7 +134,7 @@ async def test_scam_recent_join_high_risk(base_data):
     await scam.cmd_scam(msg, Cmd("123456"), **base_data)
     text = msg.reply.await_args[0][0]
     assert "Высокий риск скама" in text
-    assert "Присоединился к каналу 2 недели назад." in text
+    assert "Присоединился к каналу меньше недели назад." in text
     assert "wem1r0" in text
 
 
@@ -162,7 +162,72 @@ async def test_scam_risk_omits_account_age_when_unavailable(base_data, monkeypat
     await scam.cmd_scam(msg, Cmd("123456"), **base_data)
     text = msg.reply.await_args[0][0]
     assert "Аккаунт создан" not in text
-    assert "Присоединился к каналу 2 недели назад." in text
+    assert "Присоединился к каналу меньше недели назад." in text
+
+
+async def test_scam_join_over_week_no_risk(base_data):
+    # Порог снижен до недели: вступил 10 дней назад → риска нет.
+    msg = make_message(chat=SimpleNamespace(id=-100, type="supergroup", title="G"))
+    from bot.utils import join_date
+
+    join_date.get_joined_date.return_value = datetime.now(UTC) - timedelta(days=10)
+    base_data["_"] = _ru
+    await scam.cmd_scam(msg, Cmd("123456"), **base_data)
+    text = msg.reply.await_args[0][0]
+    assert "риск скама минимален" in text
+    assert "Высокий риск" not in text
+
+
+# --------------------------------------------------------------------------- #
+# Авто-предупреждение для новичков младше суток
+# --------------------------------------------------------------------------- #
+async def test_auto_warn_newbie_under_one_day(base_data):
+    from bot.utils import join_date
+
+    join_date.get_joined_date.return_value = datetime.now(UTC) - timedelta(hours=2)
+    base_data["_"] = _ru
+    base_data["is_admin"] = False
+    base_data["redis"].get.return_value = None  # флага ещё нет
+    msg = make_message(from_user=make_user(555, "Newbie"))
+    assert await scam.maybe_warn_newbie(msg, base_data) is True
+    text = msg.reply.await_args[0][0]
+    assert "высокий риск скама" in text.lower()
+    assert "wem1r0" in text
+    base_data["redis"].set.assert_awaited_once()
+
+
+async def test_auto_warn_old_member_ok(base_data):
+    from bot.utils import join_date
+
+    join_date.get_joined_date.return_value = datetime.now(UTC) - timedelta(days=5)
+    msg = make_message(from_user=make_user(555, "Old"))
+    assert await scam.maybe_warn_newbie(msg, base_data) is False
+    msg.reply.assert_not_awaited()
+    base_data["redis"].set.assert_not_awaited()
+
+
+async def test_auto_warn_once_per_period(base_data):
+    from bot.utils import join_date
+
+    join_date.get_joined_date.return_value = datetime.now(UTC) - timedelta(hours=2)
+    base_data["redis"].get.return_value = "1"  # флаг уже стоит
+    msg = make_message(from_user=make_user(555, "Newbie"))
+    assert await scam.maybe_warn_newbie(msg, base_data) is False
+    msg.reply.assert_not_awaited()
+
+
+async def test_auto_warn_skips_admins_and_bots(base_data):
+    from bot.utils import join_date
+
+    join_date.get_joined_date.return_value = datetime.now(UTC) - timedelta(hours=2)
+    admin_data = dict(base_data, is_admin=True)
+    msg = make_message(from_user=make_user(555, "Admin"))
+    assert await scam.maybe_warn_newbie(msg, admin_data) is False
+    msg.reply.assert_not_awaited()
+
+    bot_msg = make_message(from_user=make_user(777, "Bot", is_bot=True))
+    assert await scam.maybe_warn_newbie(bot_msg, base_data) is False
+    bot_msg.reply.assert_not_awaited()
 
 
 async def test_scam_reply_target(base_data):

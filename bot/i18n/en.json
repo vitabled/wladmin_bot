@@ -121,7 +121,7 @@
   "scam_found": "🚫 {user} is on the scam list! Reason: {reason}",
   "scam_verified": "✅ {user} is a verified seller with reputation — scam risk is minimal.",
   "scam_risk": "⚠️ WARNING! High scam risk (we recommend using an escrow)\n{factors}",
-  "scam_risk_joined": "Joined the channel 2 weeks ago.",
+  "scam_risk_joined": "Joined the channel less than a week ago.",
   "scam_risk_age": "Account created more than 5 months ago.",
   "scam_ok": "✅ Everything looks fine with the seller — scam risk is minimal.",
   "scam_footer": "Report a scammer: Scam-list thread (<a href=\"https://t.me/whitelistsmarket/32\">https://t.me/whitelistsmarket/32</a>) or DM @wem1r0",
@@ -144,5 +144,6 @@
   "fed_already_banned": "ℹ️ {user} is already federation-banned.",
   "fed_banned": "🚫 {user} banned across federation “{name}” ({count} chats).",
   "fed_not_banned": "ℹ️ {user} is not federation-banned.",
-  "fed_unbanned": "🔓 {user} unbanned across federation “{name}”."
+  "fed_unbanned": "🔓 {user} unbanned across federation “{name}”.",
+  "scam_auto_warn": "⚠️ {user} — joined the channel less than a day ago. HIGH scam risk (we recommend using an escrow)."
 }

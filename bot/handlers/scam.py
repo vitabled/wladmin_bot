@@ -24,7 +24,9 @@ from aiogram import Bot, Router, types
 from aiogram.filters import Command, CommandObject
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from bot.cache.redis import RedisClient
 from bot.constants import (
+    SCAM_AUTO_WARN_DAYS,
     SCAM_JOINED_RISK_DAYS,
     SCAM_SOURCE_SCAM,
     SCAM_SOURCE_VERIFIED,
@@ -125,6 +127,55 @@ async def cmd_scam(
             body = _("scam_ok")
 
     await message.reply(f"{body}\n\n{_('scam_footer')}", parse_mode="HTML")
+
+
+async def maybe_warn_newbie(message: types.Message, data: dict[str, Any]) -> bool:
+    """Авто-предупреждение о высоком риске для участника младше суток.
+
+    Вызывается из per-message хендлера после антиспама: если автор —
+    реальный пользователь (не админ/бот/канал), вступивший в чат меньше
+    ``SCAM_AUTO_WARN_DAYS`` дней назад, бот один раз (флаг в Redis на период)
+    отвечает предупреждением о высоком риске скама.
+    """
+    settings = data.get("settings")
+    if not settings:
+        return False
+    if data.get("is_admin"):
+        return False
+    user = message.from_user
+    if user is None or user.is_bot:
+        return False
+    if message.sender_chat is not None or message.is_automatic_forward:
+        return False
+    try:
+        from bot.utils import join_date
+
+        joined = await join_date.get_joined_date(message.chat.id, user.id)
+    except Exception:
+        joined = None
+    if joined is None:
+        return False
+    try:
+        if joined.tzinfo is None:
+            joined = joined.replace(tzinfo=UTC)
+        if datetime.now(UTC) - joined >= timedelta(days=SCAM_AUTO_WARN_DAYS):
+            return False
+    except TypeError:
+        return False
+
+    redis: RedisClient = data["redis"]
+    flag_key = f"scam_auto_warn:{message.chat.id}:{user.id}"
+    if await redis.get(flag_key):
+        return False
+    await redis.set(flag_key, "1", ttl=int(SCAM_AUTO_WARN_DAYS * 86400))
+
+    _ = data["_"]
+    mention = build_mention(user.id, user.first_name or "")
+    await message.reply(
+        f"{_('scam_auto_warn', user=mention)}\n\n{_('scam_footer')}",
+        parse_mode="HTML",
+    )
+    return True
 
 
 @router.message(Command("addtowl"))
