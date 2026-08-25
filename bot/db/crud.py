@@ -27,6 +27,7 @@ from bot.db.models import (
     FederationBan,
     FederationChat,
     ModLog,
+    ScamList,
     ScheduledPost,
     Stopword,
     Trigger,
@@ -685,6 +686,45 @@ async def count_fedbans(session: AsyncSession, fed_id: int) -> int:
         .where(FederationBan.federation_id == fed_id)
     )
     return int(result.scalar_one())
+
+
+# --------------------------------------------------------------------------- #
+# Scam list / seller reputation (Phase 9)
+# --------------------------------------------------------------------------- #
+async def get_scam_entry(
+    session: AsyncSession, user_id: int
+) -> ScamList | None:
+    """Return a user's reputation record (scam/verified/manual), or None."""
+    result = await session.execute(
+        select(ScamList).where(ScamList.user_id == user_id).limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def upsert_scam_entry(
+    session: AsyncSession,
+    user_id: int,
+    source: str,
+    reason: str | None = None,
+) -> None:
+    """Insert or overwrite a user's reputation record (unique per user_id)."""
+    stmt = (
+        pg_insert(ScamList)
+        .values(user_id=user_id, source=source, reason=reason)
+        .on_conflict_do_update(
+            index_elements=[ScamList.user_id],
+            set_={"source": source, "reason": reason},
+        )
+    )
+    await session.execute(stmt)
+
+
+async def remove_scam_entry(session: AsyncSession, user_id: int) -> bool:
+    """Delete a user's reputation record. False if it didn't exist."""
+    result = await session.execute(
+        delete(ScamList).where(ScamList.user_id == user_id)
+    )
+    return bool(result.rowcount)
 
 
 # --------------------------------------------------------------------------- #

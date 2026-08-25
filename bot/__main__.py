@@ -22,6 +22,7 @@ from bot.handlers import (
     federation,
     menu,
     moderation,
+    scam,
     schedule,
     settings_cmd,
     stats,
@@ -70,6 +71,7 @@ def build_dispatcher(
     dp.include_router(stats.router)
     dp.include_router(schedule.router)
     dp.include_router(federation.router)
+    dp.include_router(scam.router)
     dp.include_router(captcha.router)
     dp.include_router(welcome.router)
     dp.include_router(antispam.router)

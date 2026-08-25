@@ -301,3 +301,23 @@ class ModLog(Base):
     )
 
     chat: Mapped[Chat] = relationship(back_populates="mod_logs")
+
+
+class ScamList(Base):
+    """Global seller-reputation record (not per-chat).
+
+    ``source`` is one of ``scam`` / ``verified`` / ``manual``: a user flagged
+    as a scammer, whitelisted as a verified seller, or manually curated.
+    ``/scam`` consults this table; ``/addtowl`` writes ``verified`` entries.
+    """
+
+    __tablename__ = "scam_list"
+    __table_args__ = (UniqueConstraint("user_id", name="uq_scam_list_user"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source: Mapped[str] = mapped_column(String(20), default="manual")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

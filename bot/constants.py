@@ -106,6 +106,13 @@ SCHEDULE_PREVIEW_LEN: Final = 50
 FED_NAME_MIN: Final = 3
 FED_NAME_MAX: Final = 32
 
+# --- Scam list / seller reputation (Phase 9) ----------------------------
+SCAM_SOURCE_SCAM: Final = "scam"
+SCAM_SOURCE_VERIFIED: Final = "verified"
+SCAM_SOURCE_MANUAL: Final = "manual"
+# A join younger than this (days) is a /scam risk factor.
+SCAM_JOINED_RISK_DAYS: Final = 14
+
 # --- Default welcome text placeholders ----------------------------------
 DEFAULT_WELCOME_TEXT: Final = "{mention}, добро пожаловать в {chat_title}!"
 
