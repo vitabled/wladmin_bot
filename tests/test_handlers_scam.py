@@ -53,6 +53,19 @@ async def test_scam_no_target(base_data):
     assert msg.reply.await_args[0][0].startswith("scam_no_target")
 
 
+async def test_scam_mention_without_target_hints_both_forms(base_data):
+    # "/scam@lotesadminbot" без аргументов и без reply — то же, что /scam без
+    # цели: подсказка должна объяснить оба способа (ответ на сообщение ИЛИ
+    # /scam @nickname / /scam <telegram-id>).
+    base_data["_"] = _ru
+    msg = make_message()
+    await scam.cmd_scam(msg, Cmd(None), **base_data)
+    text = msg.reply.await_args[0][0]
+    assert "ответом" in text
+    assert "@nickname" in text
+    assert "telegram-id" in text
+
+
 async def test_scam_numeric_id_lookup(base_data):
     crud.get_scam_entry.return_value = _scam_entry("scam", "обман на 5к")
     base_data["_"] = _ru
