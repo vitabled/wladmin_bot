@@ -10,6 +10,7 @@ from __future__ import annotations
 import html
 
 from bot.constants import DEFAULT_WELCOME_TEXT, MAX_MESSAGE_LENGTH
+from bot.emoji import decorate
 
 
 def escape_html(text: str) -> str:
@@ -38,6 +39,11 @@ def render_welcome(
     {members_count}``. Falls back to the default template when unset/blank.
     """
     text = template if (template and template.strip()) else DEFAULT_WELCOME_TEXT
+    # Premium-эмодзи: обычные глифы из таблицы (⚙️ ✅ и т.п.), введённые в
+    # шаблон, оборачиваются в <tg-emoji> — приветствие отправляется с
+    # parse_mode=HTML, поэтому теги отрендерятся как премиум. Уже вставленные
+    # оператором <tg-emoji>/прочие теги decorate не трогает (идемпотентно).
+    text = decorate(text) or text
 
     replacements = {
         "{first_name}": escape_html(first_name),

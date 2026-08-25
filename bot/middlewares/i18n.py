@@ -47,11 +47,11 @@ class I18nMiddleware(BaseMiddleware):
             text = self.i18n.get(key, lang, **kwargs)
             # Premium-эмодзи: <tg-emoji> теги (только если текст содержит глифы
             # из таблицы; plain-эмодзи без премиум-варианта остаются как есть).
-            if lang == "ru":
-                from bot.emoji import decorate
+            # Декорируем для ВСЕХ языков — владелец бота с Premium, глифы из
+            # ai-router-набора одинаковы в ru/en.
+            from bot.emoji import decorate
 
-                return decorate(text) or text
-            return text
+            return decorate(text) or text
 
         def _raw(key: str, **kwargs: Any) -> str:
             """Перевод без premium-декорации — для кнопок/инлайн-текста,
