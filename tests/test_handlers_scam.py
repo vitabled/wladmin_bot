@@ -66,6 +66,24 @@ async def test_scam_mention_without_target_hints_both_forms(base_data):
     assert "telegram-id" in text
 
 
+async def test_scam_bot_own_username_is_no_target(base_data, monkeypatch):
+    # "/scam @lotesadminbot" (с пробелом — клиент часто подставляет username
+    # бота как аргумент): resolve_target резолвит самого бота через get_chat,
+    # и это должно трактоваться как отсутствие цели, а не scam_ok.
+    bot = make_message().bot
+    bot.get_chat = AsyncMock(
+        return_value=SimpleNamespace(
+            id=bot.id, type="private", full_name="WL Market Admin", username="lotesadminbot"
+        )
+    )
+    monkeypatch.setattr(crud, "get_user_by_username", AsyncMock(return_value=None))
+    msg = make_message(from_user=make_user(9, "Checker"), bot=bot)
+    await scam.cmd_scam(msg, Cmd("@lotesadminbot"), **base_data)
+    crud.get_scam_entry.assert_not_awaited()
+    text = msg.reply.await_args[0][0]
+    assert "scam_no_target" in text
+
+
 async def test_scam_numeric_id_lookup(base_data):
     crud.get_scam_entry.return_value = _scam_entry("scam", "обман на 5к")
     base_data["_"] = _ru
@@ -176,3 +194,19 @@ async def test_addtowl_owner_allowed_in_pm(base_data):
     msg = make_message(chat=SimpleNamespace(id=111, type="private", title="PM"))
     await scam.cmd_addtowl(msg, Cmd("123456"), **base_data)
     crud.upsert_scam_entry.assert_awaited_once()
+
+
+async def test_addtowl_bot_own_username_blocked(base_data, monkeypatch):
+    # "/addtowl @lotesadminbot" — цель = сам бот: не заносим в белый список.
+    bot = make_message().bot
+    bot.get_chat = AsyncMock(
+        return_value=SimpleNamespace(
+            id=bot.id, type="private", full_name="WL Market Admin", username="lotesadminbot"
+        )
+    )
+    monkeypatch.setattr(crud, "get_user_by_username", AsyncMock(return_value=None))
+    msg = make_message(from_user=make_user(9, "Admin"), bot=bot)
+    await scam.cmd_addtowl(msg, Cmd("@lotesadminbot"), **base_data)
+    crud.upsert_scam_entry.assert_not_awaited()
+    crud.remove_scam_entry.assert_not_awaited()
+    assert "error_cannot_act_on_bot" in msg.reply.await_args[0][0]

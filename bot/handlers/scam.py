@@ -92,6 +92,13 @@ async def cmd_scam(
         await message.reply(_(key))
         return
 
+    # Если целью оказался сам бот (типичный случай "/scam @lotesadminbot" —
+    # клиент подставляет username бота как аргумент), это не цель, а её
+    # отсутствие: показываем подсказку, а не «проверяем» бота.
+    if target.user_id == bot.id:
+        await message.reply(_("scam_no_target"))
+        return
+
     entry = await crud.get_scam_entry(session, target.user_id)
     mention = build_mention(target.user_id, target.name)
 
@@ -131,6 +138,12 @@ async def cmd_addtowl(
     target, error_key, _consumed = await resolve_target(message, args, session, bot)
     if error_key is not None or target is None:
         await message.reply(_(error_key or "addtowl_usage"))
+        return
+
+    # Не даём заносить в белый список самого бота (тот же кейс, что и в /scam:
+    # "/addtowl @lotesadminbot" резолвится в собственный username бота).
+    if target.user_id == bot.id:
+        await message.reply(_("error_cannot_act_on_bot"))
         return
 
     mention = build_mention(target.user_id, target.name)
