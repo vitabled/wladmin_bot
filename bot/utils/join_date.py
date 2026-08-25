@@ -15,16 +15,21 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
 _client = None
 _client_lock = asyncio.Lock()
-_CACHE: dict[tuple[int, int], datetime | None] = {}
+# Кэш: (chat_id, user_id) -> (datetime | None, записан_в). None кэшируется
+# НЕДОЛГО (60с) — временный сбой не должен навсегда заставлять /scam
+# говорить «риск минимален» из-за старого None.
+_CACHE: dict[tuple[int, int], tuple[datetime | None, float]] = {}
 _CACHE_MAX = 2048
+_NONE_TTL = 60.0
 
 _REQUEST_TIMEOUT = 8.0
+_START_TIMEOUT = 15.0
 
 
 def _env(name: str) -> str | None:
@@ -50,8 +55,12 @@ async def _get_client():
         if not api_id_raw or not api_id_raw.isdigit() or not api_hash or not token:
             logger.warning("join_date: missing TELETHON_API_ID/HASH or bot token")
             return None
-        client = TelegramClient(None, int(api_id_raw), api_hash)
-        await client.start(bot_token=token)
+        try:
+            client = TelegramClient(None, int(api_id_raw), api_hash)
+            await asyncio.wait_for(client.start(bot_token=token), timeout=_START_TIMEOUT)
+        except Exception as e:
+            logger.warning("join_date: mtproto client init failed: %s", e)
+            return None
         _client = client
         return client
 
@@ -62,8 +71,12 @@ async def get_joined_date(chat_id: int, user_id: int) -> datetime | None:
     Для создателя чата date отсутствует у Telegram (None) — тоже ``None``.
     """
     key = (chat_id, user_id)
-    if key in _CACHE:
-        return _CACHE[key]
+    now = asyncio.get_event_loop().time()
+    cached = _CACHE.get(key)
+    if cached is not None:
+        value, ts = cached
+        if value is not None or now - ts < _NONE_TTL:
+            return value
 
     joined: datetime | None = None
     try:
@@ -82,15 +95,15 @@ async def get_joined_date(chat_id: int, user_id: int) -> datetime | None:
         )
         raw = getattr(res.participant, "date", None)
         if isinstance(raw, (int, float)):
-            joined = datetime.fromtimestamp(raw, tz=UTC)
+            joined = datetime.fromtimestamp(raw, tz=timezone.utc)
         elif isinstance(raw, datetime):
             joined = raw
             if joined.tzinfo is None:
-                joined = joined.replace(tzinfo=UTC)
+                joined = joined.replace(tzinfo=timezone.utc)
     except Exception as e:
         logger.warning("join_date: getParticipant chat=%s user=%s: %s", chat_id, user_id, e)
 
     if len(_CACHE) >= _CACHE_MAX:
         _CACHE.clear()
-    _CACHE[key] = joined
+    _CACHE[key] = (joined, asyncio.get_event_loop().time())
     return joined
