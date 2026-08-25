@@ -23,3 +23,6 @@ fastapi==0.121.2
 uvicorn==0.41.0
 python-multipart==0.0.20
 itsdangerous==2.2.0
+
+# MTProto (joined_date для /scam — Bot API его не отдаёт)
+telethon==1.44.0

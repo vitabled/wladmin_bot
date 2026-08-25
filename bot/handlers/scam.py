@@ -45,16 +45,18 @@ async def _risk_factors(
 ) -> list[str]:
     """Collect measurable risk signals (i18n keys), honest about gaps.
 
-    Bot API gives us no account-creation date, so the only factual signal is
-    ``joined_date`` from ``get_chat_member`` (groups only). Anything we cannot
-    verify is omitted — never guessed.
+    Bot API gives us no joined_date (aiogram 3.29 ChatMember has no such
+    field), so the only factual signal is the join date from MTProto
+    ``channels.getParticipant`` (bot token). Anything we cannot verify is
+    omitted — never guessed.
     """
     factors: list[str] = []
     if chat is None or chat.type not in _GROUP_TYPES:
         return factors
     try:
-        member = await bot.get_chat_member(chat.id, user_id)
-        joined = getattr(member, "joined_date", None)
+        from bot.utils import join_date
+
+        joined = await join_date.get_joined_date(chat.id, user_id)
     except Exception:
         joined = None
     if joined is None:

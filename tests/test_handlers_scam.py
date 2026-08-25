@@ -28,19 +28,15 @@ def patch_crud(monkeypatch):
     monkeypatch.setattr(crud, "get_scam_entry", AsyncMock(return_value=None))
     monkeypatch.setattr(crud, "upsert_scam_entry", AsyncMock())
     monkeypatch.setattr(crud, "remove_scam_entry", AsyncMock(return_value=True))
+    # joined_date в Bot API/aiogram отсутствует — провайдер честно даёт None,
+    # если тест не переопределил.
+    from bot.utils import join_date
+
+    monkeypatch.setattr(join_date, "get_joined_date", AsyncMock(return_value=None))
 
 
 def _scam_entry(source: str, reason: str | None = None):
     return SimpleNamespace(source=source, reason=reason)
-
-
-def _member(joined_days_ago: int | None):
-    if joined_days_ago is None:
-        return SimpleNamespace(status="member", joined_date=None)
-    return SimpleNamespace(
-        status="member",
-        joined_date=datetime.now(UTC) - timedelta(days=joined_days_ago),
-    )
 
 
 # --------------------------------------------------------------------------- #
@@ -108,9 +104,11 @@ async def test_scam_verified_seller(base_data):
 
 
 async def test_scam_unknown_ok(base_data):
-    # No entry, group member joined long ago → no risk factors.
+    # No entry, joined long ago → no risk factors.
     msg = make_message(chat=SimpleNamespace(id=-100, type="supergroup", title="G"))
-    msg.bot.get_chat_member = AsyncMock(return_value=_member(joined_days_ago=90))
+    from bot.utils import join_date
+
+    join_date.get_joined_date.return_value = datetime.now(UTC) - timedelta(days=90)
     base_data["_"] = _ru
     await scam.cmd_scam(msg, Cmd("123456"), **base_data)
     text = msg.reply.await_args[0][0]
@@ -118,9 +116,20 @@ async def test_scam_unknown_ok(base_data):
     assert "wem1r0" in text
 
 
+async def test_scam_join_date_unavailable_ok(base_data):
+    # Провайдер даты вступления недоступен (None) → риск не выдумываем.
+    msg = make_message(chat=SimpleNamespace(id=-100, type="supergroup", title="G"))
+    base_data["_"] = _ru
+    await scam.cmd_scam(msg, Cmd("123456"), **base_data)
+    text = msg.reply.await_args[0][0]
+    assert "риск скама минимален" in text
+
+
 async def test_scam_recent_join_high_risk(base_data):
     msg = make_message(chat=SimpleNamespace(id=-100, type="supergroup", title="G"))
-    msg.bot.get_chat_member = AsyncMock(return_value=_member(joined_days_ago=3))
+    from bot.utils import join_date
+
+    join_date.get_joined_date.return_value = datetime.now(UTC) - timedelta(days=3)
     base_data["_"] = _ru
     await scam.cmd_scam(msg, Cmd("123456"), **base_data)
     text = msg.reply.await_args[0][0]
@@ -131,11 +140,11 @@ async def test_scam_recent_join_high_risk(base_data):
 
 async def test_scam_risk_includes_account_age_when_available(base_data, monkeypatch):
     # Провайдер возраста аккаунта вернул > 5 месяцев → строка добавляется.
-    from bot.utils import account_age
+    from bot.utils import account_age, join_date
 
+    join_date.get_joined_date.return_value = datetime.now(UTC) - timedelta(days=3)
     monkeypatch.setattr(account_age, "get_account_age_days", AsyncMock(return_value=400))
     msg = make_message(chat=SimpleNamespace(id=-100, type="supergroup", title="G"))
-    msg.bot.get_chat_member = AsyncMock(return_value=_member(joined_days_ago=3))
     base_data["_"] = _ru
     await scam.cmd_scam(msg, Cmd("123456"), **base_data)
     text = msg.reply.await_args[0][0]
@@ -144,11 +153,11 @@ async def test_scam_risk_includes_account_age_when_available(base_data, monkeypa
 
 async def test_scam_risk_omits_account_age_when_unavailable(base_data, monkeypatch):
     # Источник возраста недоступен (None) → строка про возраст не выводится.
-    from bot.utils import account_age
+    from bot.utils import account_age, join_date
 
+    join_date.get_joined_date.return_value = datetime.now(UTC) - timedelta(days=3)
     monkeypatch.setattr(account_age, "get_account_age_days", AsyncMock(return_value=None))
     msg = make_message(chat=SimpleNamespace(id=-100, type="supergroup", title="G"))
-    msg.bot.get_chat_member = AsyncMock(return_value=_member(joined_days_ago=3))
     base_data["_"] = _ru
     await scam.cmd_scam(msg, Cmd("123456"), **base_data)
     text = msg.reply.await_args[0][0]
