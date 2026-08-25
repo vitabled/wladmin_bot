@@ -20,7 +20,7 @@
   "mod_ban_temp": "🚫 {user} has been banned for {duration}.{reason}",
   "mod_unban": "🔓 {user} has been unbanned.",
   "mod_not_banned": "ℹ️ {user} was not banned.",
-  "mod_kick": "👢 {user} has been kicked.{reason}",
+  "mod_kick": "🚪 {user} has been kicked.{reason}",
   "mod_mute": "🔇 {user} has been muted permanently.{reason}",
   "mod_mute_temp": "🔇 {user} has been muted for {duration}.{reason}",
   "mod_unmute": "🔊 {user} has been unmuted.",

@@ -20,7 +20,7 @@
   "mod_ban_temp": "🚫 {user} забанен на {duration}.{reason}",
   "mod_unban": "🔓 {user} разбанен.",
   "mod_not_banned": "ℹ️ {user} не был забанен.",
-  "mod_kick": "👢 {user} выгнан из чата.{reason}",
+  "mod_kick": "🚪 {user} выгнан из чата.{reason}",
   "mod_mute": "🔇 {user} замучен навсегда.{reason}",
   "mod_mute_temp": "🔇 {user} замучен на {duration}.{reason}",
   "mod_unmute": "🔊 {user} размучен.",
