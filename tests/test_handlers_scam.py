@@ -125,8 +125,35 @@ async def test_scam_recent_join_high_risk(base_data):
     await scam.cmd_scam(msg, Cmd("123456"), **base_data)
     text = msg.reply.await_args[0][0]
     assert "Высокий риск скама" in text
-    assert "меньше 2 недель" in text
+    assert "Присоединился к каналу 2 недели назад." in text
     assert "wem1r0" in text
+
+
+async def test_scam_risk_includes_account_age_when_available(base_data, monkeypatch):
+    # Провайдер возраста аккаунта вернул > 5 месяцев → строка добавляется.
+    from bot.utils import account_age
+
+    monkeypatch.setattr(account_age, "get_account_age_days", AsyncMock(return_value=400))
+    msg = make_message(chat=SimpleNamespace(id=-100, type="supergroup", title="G"))
+    msg.bot.get_chat_member = AsyncMock(return_value=_member(joined_days_ago=3))
+    base_data["_"] = _ru
+    await scam.cmd_scam(msg, Cmd("123456"), **base_data)
+    text = msg.reply.await_args[0][0]
+    assert "Аккаунт создан больше 5 месяцев назад." in text
+
+
+async def test_scam_risk_omits_account_age_when_unavailable(base_data, monkeypatch):
+    # Источник возраста недоступен (None) → строка про возраст не выводится.
+    from bot.utils import account_age
+
+    monkeypatch.setattr(account_age, "get_account_age_days", AsyncMock(return_value=None))
+    msg = make_message(chat=SimpleNamespace(id=-100, type="supergroup", title="G"))
+    msg.bot.get_chat_member = AsyncMock(return_value=_member(joined_days_ago=3))
+    base_data["_"] = _ru
+    await scam.cmd_scam(msg, Cmd("123456"), **base_data)
+    text = msg.reply.await_args[0][0]
+    assert "Аккаунт создан" not in text
+    assert "Присоединился к каналу 2 недели назад." in text
 
 
 async def test_scam_reply_target(base_data):

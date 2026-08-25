@@ -110,6 +110,13 @@ async def cmd_scam(
     else:
         factors = await _risk_factors(bot, message.chat, target.user_id)
         if factors:
+            # Возраст аккаунта: Telegram не отдаёт дату создания (ни Bot API,
+            # ни MTProto) — провайдер честно вернёт None, пока нет источника.
+            from bot.utils import account_age
+
+            age_days = await account_age.get_account_age_days(target.user_id)
+            if age_days is not None and age_days > account_age.ACCOUNT_AGE_RISK_DAYS:
+                factors.append("scam_risk_age")
             listed = "\n".join(_(key) for key in factors)
             body = _("scam_risk", factors=listed)
         else:
