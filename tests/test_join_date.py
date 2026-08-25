@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from bot.utils import join_date
 
-_D = datetime(2026, 8, 25, 9, 28, 28, tzinfo=timezone.utc)
+_D = datetime(2026, 8, 25, 9, 28, 28, tzinfo=UTC)
 
 
 async def test_returns_none_without_creds(monkeypatch):

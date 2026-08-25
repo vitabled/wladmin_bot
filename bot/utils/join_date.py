@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 logger = logging.getLogger(__name__)
 
@@ -95,11 +95,11 @@ async def get_joined_date(chat_id: int, user_id: int) -> datetime | None:
         )
         raw = getattr(res.participant, "date", None)
         if isinstance(raw, (int, float)):
-            joined = datetime.fromtimestamp(raw, tz=timezone.utc)
+            joined = datetime.fromtimestamp(raw, tz=UTC)
         elif isinstance(raw, datetime):
             joined = raw
             if joined.tzinfo is None:
-                joined = joined.replace(tzinfo=timezone.utc)
+                joined = joined.replace(tzinfo=UTC)
     except Exception as e:
         logger.warning("join_date: getParticipant chat=%s user=%s: %s", chat_id, user_id, e)
 
