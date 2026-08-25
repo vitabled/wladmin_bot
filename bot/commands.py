@@ -29,14 +29,16 @@ from aiogram.types import (
 logger = logging.getLogger(__name__)
 
 # command -> {lang: description}
+# /start не показываем обычным пользователям (остаётся рабочим по прямому
+# вводу), поэтому его нет в _ALL_USERS; админам он доступен через _ADMIN_ONLY.
 _ALL_USERS: list[tuple[str, dict[str, str]]] = [
-    ("start", {"en": "About the bot", "ru": "О боте"}),
     ("help", {"en": "Command help", "ru": "Справка по командам"}),
     ("info", {"en": "Bot info & safety rules", "ru": "Инфо и правила безопасности"}),
     ("scam", {"en": "Check a seller for scam risk", "ru": "Проверить продавца на скам"}),
 ]
 
 _ADMIN_ONLY: list[tuple[str, dict[str, str]]] = [
+    ("start", {"en": "About the bot", "ru": "О боте"}),
     ("addtowl", {"en": "Whitelist a verified seller", "ru": "В белый список продавцов"}),
     ("settings", {"en": "Show current settings", "ru": "Текущие настройки"}),
     ("menu", {"en": "Settings menu (buttons)", "ru": "Меню настроек (кнопки)"}),

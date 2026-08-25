@@ -23,7 +23,9 @@ def test_every_command_has_en_description():
 
 def test_all_users_commands():
     names = [name for name, _ in _ALL_USERS]
-    assert names == ["start", "help", "info", "scam"]
+    # /start скрыт у обычных пользователей (остаётся рабочим по прямому вводу).
+    assert names == ["help", "info", "scam"]
+    assert "start" not in names
 
 
 def test_admin_commands_include_all_users_plus_moderation():
@@ -32,6 +34,8 @@ def test_admin_commands_include_all_users_plus_moderation():
     # Админ видит и общие команды (скоупы могут перекрывать друг друга).
     for name in all_names:
         assert name in admin_names
+    # /start остаётся видимым только админам.
+    assert "start" in admin_names
     # Админские команды поверх общего набора.
     for name in ("addtowl", "ban", "mute", "warn", "settings", "menu", "finfo"):
         assert name in admin_names
@@ -63,10 +67,10 @@ async def test_setup_registers_all_users_for_groups():
         if call.kwargs["scope"].type == BotCommandScopeAllGroupChats().type
     ]
     assert group_calls, "no AllGroupChats registration"
-    # Каждый вызов для групп несёт только общий набор (без модерации).
+    # Каждый вызов для групп несёт только общий набор (без модерации и /start).
     for call in group_calls:
         names = [c.command for c in call.args[0]]
-        assert names == ["start", "help", "info", "scam"]
+        assert names == ["help", "info", "scam"]
 
     admin_calls = [
         call
