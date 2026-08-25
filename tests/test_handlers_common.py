@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
-
 from bot.handlers import common
 from tests.conftest import make_message
 
