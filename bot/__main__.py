@@ -13,7 +13,7 @@ from aiohttp import web
 
 from bot.cache.redis import RedisClient
 from bot.commands import setup_bot_commands
-from bot.config import configure_logging, get_settings
+from bot.config import Settings, configure_logging, get_settings
 from bot.db.session import create_engine, get_async_session_maker
 from bot.handlers import (
     antispam,
@@ -79,6 +79,68 @@ def build_dispatcher(
     return dp
 
 
+async def _run_polling(
+    dp: Dispatcher,
+    bot: Bot,
+    settings: Settings,
+    session_maker,
+    redis: RedisClient,
+    engine,
+) -> None:
+    """Long-polling delivery (getUpdates) instead of a webhook.
+
+    Used when no public HTTPS webhook URL is available (local/dev hosts).
+    Migrations, the /start command menu and the scheduler behave exactly as
+    in webhook mode; a minimal /health endpoint keeps the compose healthcheck
+    and port probes working.
+    """
+    await redis.connect()
+    try:
+        await asyncio.to_thread(_run_migrations)
+        logger.info("migrations.applied")
+    except Exception:
+        logger.exception("migrations.failed")
+        raise
+
+    # Telegram routes updates to the webhook until it is cleared; drop any
+    # stale webhook so getUpdates starts delivering.
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+        logger.info("webhook.cleared_for_polling")
+    except Exception:
+        logger.exception("delete_webhook.failed")
+
+    await setup_bot_commands(bot)
+    spawn(run_scheduler(bot, session_maker))
+    logger.info("scheduler.spawned")
+    logger.info("bot.started (polling mode)")
+
+    # Minimal liveness endpoint on the webhook port for healthchecks.
+    health_app = web.Application()
+
+    async def health(_: web.Request) -> web.Response:
+        return web.json_response({"status": "ok", "mode": "polling"})
+
+    health_app.router.add_get("/health", health)
+    runner = web.AppRunner(health_app)
+    await runner.setup()
+    await web.TCPSite(runner, settings.WEBHOOK_HOST, settings.WEBHOOK_PORT).start()
+
+    try:
+        await dp.start_polling(
+            bot,
+            allowed_updates=dp.resolve_used_update_types(),
+        )
+    finally:
+        await cancel_all()
+        await runner.cleanup()
+        await dp.storage.close()
+        await redis.disconnect()
+        await engine.dispose()
+        await bot.session.close()
+        logger.info("bot.shutdown")
+
+
 async def on_startup(app: web.Application) -> None:
     settings = get_settings()
     bot: Bot = app["bot"]
@@ -135,7 +197,7 @@ def main() -> None:
 
     bot = Bot(
         token=settings.TELEGRAM_BOT_TOKEN,
-        default=DefaultBotProperties(parse_mode=None),
+        default=DefaultBotProperties(parse_mode="HTML"),
     )
     engine = create_engine()
     session_maker = get_async_session_maker(engine)
@@ -143,6 +205,10 @@ def main() -> None:
     dp = build_dispatcher(
         session_maker, redis, settings.OWNER_ID, settings.SETTINGS_CACHE_TTL
     )
+
+    if settings.BOT_MODE.lower() == "polling":
+        asyncio.run(_run_polling(dp, bot, settings, session_maker, redis, engine))
+        return
 
     app = web.Application()
     app["bot"] = bot

@@ -34,6 +34,7 @@ services:
       WEBHOOK_HOST: 0.0.0.0
       WEBHOOK_PORT: 8000
       WEBHOOK_PATH: ${WEBHOOK_PATH:-/webhook}
+      BOT_MODE: ${BOT_MODE:-webhook}
       OWNER_ID: ${OWNER_ID}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-telegram_bot}
       REDIS_URL: redis://redis:6379/0

@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     WEBHOOK_PORT: int = 8000
     WEBHOOK_PATH: str = "/webhook"
 
+    # Delivery mode: "webhook" (default) or "polling" (long-polling via
+    # getUpdates — for hosts without a public HTTPS webhook URL).
+    BOT_MODE: str = "webhook"
+
     # --- Owner ---
     OWNER_ID: int
 
