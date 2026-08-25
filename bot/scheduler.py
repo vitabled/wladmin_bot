@@ -19,6 +19,7 @@ from bot.constants import SCHEDULER_TICK_SECONDS
 from bot.db import crud
 from bot.services.scheduler import SchedulerService
 from bot.utils.telegram import safe_send_message
+from bot.utils.text import escape_html
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,13 @@ async def _tick(bot: Bot, session_maker: async_sessionmaker[AsyncSession]) -> No
     async with session_maker() as session:
         due = await crud.due_scheduled_posts(session, now)
         for post in due:
-            await safe_send_message(bot, post.chat_id, post.text, parse_mode="HTML")
+            # post.text — пользовательский текст админа: при глобальном
+            # parse_mode="HTML" неэкранированные теги сломали бы отправку,
+            # поэтому экранируем при отправке (форматирование <b>/<i> теряется,
+            # но пост никогда не упадёт из-за инъекции).
+            await safe_send_message(
+                bot, post.chat_id, escape_html(post.text), parse_mode="HTML"
+            )
             next_run = SchedulerService.next_run(
                 post.run_at, post.interval_seconds, now
             )

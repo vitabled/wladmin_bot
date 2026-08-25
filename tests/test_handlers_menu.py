@@ -33,6 +33,16 @@ def test_build_menu_reflects_state():
     assert any(t.startswith("❌") for t in texts)
 
 
+def test_build_menu_labels_stay_plain_no_tg_emoji():
+    # Кнопки не парсят HTML: подписи обязаны приходить без <tg-emoji> тегов,
+    # иначе пользователь увидит сырую разметку. Marks ✅/❌ тоже plain.
+    kb = menu.build_menu({}, _translate)
+    for row in kb.inline_keyboard:
+        text = row[0].text
+        assert "<tg-emoji" not in text
+        assert text.startswith(("✅", "❌")) or "close" in (row[0].callback_data or "")
+
+
 # --------------------------------------------------------------------------- #
 # /menu command
 # --------------------------------------------------------------------------- #

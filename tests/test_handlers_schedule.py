@@ -139,3 +139,30 @@ async def test_worker_tick_posts_and_advances(monkeypatch):
     worker.safe_send_message.assert_awaited_once()
     worker.crud.mark_post_ran.assert_awaited_once()
     session.commit.assert_awaited_once()
+
+
+async def test_worker_tick_escapes_post_text(monkeypatch):
+    # Глобальный parse_mode="HTML": пользовательский текст поста экранируется
+    # при отправке, иначе <b>/<i> из тела поста сломали бы сообщение.
+    post = SimpleNamespace(
+        id=1,
+        chat_id=-100,
+        text="Hello <b>bold</b> & <i>italic</i>",
+        run_at=datetime(2026, 7, 24, 11, 0, tzinfo=UTC),
+        interval_seconds=None,
+    )
+    monkeypatch.setattr(
+        worker.crud, "due_scheduled_posts", AsyncMock(return_value=[post])
+    )
+    monkeypatch.setattr(worker.crud, "mark_post_ran", AsyncMock())
+    sent = AsyncMock(return_value=None)
+    monkeypatch.setattr(worker, "safe_send_message", sent)
+
+    session = AsyncMock()
+    session_maker = lambda: _FakeSessionCM(session)  # noqa: E731
+
+    await worker._tick(bot=AsyncMock(), session_maker=session_maker)
+
+    args, kwargs = sent.await_args
+    assert args[2] == "Hello &lt;b&gt;bold&lt;/b&gt; &amp; &lt;i&gt;italic&lt;/i&gt;"
+    assert kwargs.get("parse_mode") == "HTML"

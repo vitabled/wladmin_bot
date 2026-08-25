@@ -182,6 +182,7 @@ def base_data(translator, settings, session, redis):
     """The data dict middlewares would inject into a handler."""
     return {
         "_": translator,
+        "_raw": translator,
         "lang": "ru",
         "settings": settings,
         "session": session,

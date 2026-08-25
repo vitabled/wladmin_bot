@@ -27,7 +27,7 @@ from bot.constants import (
 from bot.db import crud
 from bot.filters.chat_type import IsGroup
 from bot.services.moderation import ModerationService
-from bot.utils.text import format_duration
+from bot.utils.text import escape_html, format_duration
 
 router = Router()
 router.message.filter(IsGroup())
@@ -352,7 +352,7 @@ async def cmd_addstop(
     added = await crud.add_stopword(session, message.chat.id, word)
     await redis.invalidate_stopwords(message.chat.id)
     key = "stopword_added" if added else "stopword_exists"
-    await message.reply(_(key, word=word.lower()))
+    await message.reply(_(key, word=escape_html(word.lower())))
 
 
 @router.message(Command("delstop"))
@@ -372,7 +372,7 @@ async def cmd_delstop(
     removed = await crud.remove_stopword(session, message.chat.id, word)
     await redis.invalidate_stopwords(message.chat.id)
     key = "stopword_removed" if removed else "stopword_not_found"
-    await message.reply(_(key, word=word.lower()))
+    await message.reply(_(key, word=escape_html(word.lower())))
 
 
 @router.message(Command("stopwords"))
@@ -388,7 +388,7 @@ async def cmd_stopwords(
     if not words:
         await message.reply(_("stopwords_empty"))
         return
-    listing = "\n".join(f"• {w}" for w in words)
+    listing = "\n".join(f"• {escape_html(w)}" for w in words)
     await message.reply(_("stopwords_list", count=len(words), words=listing))
 
 
@@ -418,12 +418,12 @@ async def cmd_addtrigger(
         return
     added = await crud.add_trigger(session, message.chat.id, pattern, reply_text)
     if not added:
-        await message.reply(_("trigger_exists", pattern=pattern.lower()))
+        await message.reply(_("trigger_exists", pattern=escape_html(pattern.lower())))
         return
     # First trigger auto-enables the feature so it works without a second step.
     await _save(data, message.chat.id, triggers_enabled=True)
     await redis.invalidate_triggers(message.chat.id)
-    await message.reply(_("trigger_added", pattern=pattern.lower()))
+    await message.reply(_("trigger_added", pattern=escape_html(pattern.lower())))
 
 
 @router.message(Command("deltrigger"))
@@ -443,7 +443,7 @@ async def cmd_deltrigger(
     removed = await crud.remove_trigger(session, message.chat.id, pattern)
     await redis.invalidate_triggers(message.chat.id)
     key = "trigger_removed" if removed else "trigger_not_found"
-    await message.reply(_(key, pattern=pattern.lower()))
+    await message.reply(_(key, pattern=escape_html(pattern.lower())))
 
 
 @router.message(Command("triggers"))
@@ -472,5 +472,8 @@ async def cmd_triggers(
     if not triggers:
         await message.reply(_("triggers_empty"))
         return
-    listing = "\n".join(f"• {t['pattern']} → {t['reply_text']}" for t in triggers)
+    listing = "\n".join(
+        f"• {escape_html(t['pattern'])} → {escape_html(t['reply_text'])}"
+        for t in triggers
+    )
     await message.reply(_("triggers_list", count=len(triggers), triggers=listing))

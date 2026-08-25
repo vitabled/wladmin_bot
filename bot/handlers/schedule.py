@@ -23,7 +23,7 @@ from bot.constants import (
 from bot.db import crud
 from bot.filters.chat_type import IsGroup
 from bot.services.moderation import ModerationService
-from bot.utils.text import format_duration
+from bot.utils.text import escape_html, format_duration
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +110,8 @@ async def cmd_schedules(
             id=p.id,
             when=p.run_at.strftime("%Y-%m-%d %H:%M UTC"),
             every=(format_duration(p.interval_seconds) if p.interval_seconds else "—"),
-            preview=p.text[:SCHEDULE_PREVIEW_LEN],
+            # Превью — пользовательский текст, экранируем (список шлётся в HTML).
+            preview=escape_html(p.text[:SCHEDULE_PREVIEW_LEN]),
         )
         for p in posts
     ]

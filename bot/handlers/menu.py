@@ -62,19 +62,23 @@ def build_menu(
 async def cmd_menu(message: types.Message, **data: Any) -> None:
     """Open the inline settings menu (admins only)."""
     _ = data["_"]
+    _raw = data["_raw"]
     if not data.get("is_admin"):
         await message.reply(_("error_not_admin"))
         return
     settings = data.get("settings") or {}
-    await message.reply(_("menu_title"), reply_markup=build_menu(settings, _))
+    # Кнопки не парсят HTML: подписи берём через _raw (без <tg-emoji>).
+    await message.reply(_("menu_title"), reply_markup=build_menu(settings, _raw))
 
 
 @router.callback_query(F.data.startswith(f"{_PREFIX}:"))
 async def on_menu_callback(callback: types.CallbackQuery, **data: Any) -> None:
     """Apply a menu button press: toggle a setting or close the menu."""
     _ = data["_"]
+    _raw = data["_raw"]
     if not data.get("is_admin"):
-        await callback.answer(_("error_not_admin"), show_alert=True)
+        # Тост/алерт не парсит HTML — _raw, чтобы <tg-emoji> не был виден сырым.
+        await callback.answer(_raw("error_not_admin"), show_alert=True)
         return
 
     parts = (callback.data or "").split(":")
@@ -104,11 +108,11 @@ async def on_menu_callback(callback: types.CallbackQuery, **data: Any) -> None:
         settings[field] = new_val
         try:
             await callback.message.edit_reply_markup(
-                reply_markup=build_menu(settings, _)
+                reply_markup=build_menu(settings, _raw)
             )
         except Exception:
             pass
-        await callback.answer(_("menu_saved"))
+        await callback.answer(_raw("menu_saved"))
         return
 
     await callback.answer()

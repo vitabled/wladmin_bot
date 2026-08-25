@@ -70,6 +70,7 @@ async def _start_captcha(
     settings: dict[str, Any],
     translate: Any,
     lang: str,
+    translate_raw: Any | None = None,
 ) -> bool:
     """Restrict the user and post a captcha challenge.
 
@@ -111,7 +112,12 @@ async def _start_captcha(
         text = translate("captcha_prompt_button", user=mention, timeout=human_timeout)
 
     keyboard = _build_keyboard(
-        chat.id, user.id, ctype, options, translate("captcha_button_label")
+        chat.id,
+        user.id,
+        ctype,
+        options,
+        # Кнопка не парсит HTML — подпись без <tg-emoji>.
+        (translate_raw or translate)("captcha_button_label"),
     )
     msg = await safe_send_message(
         bot, chat.id, text, parse_mode="HTML", reply_markup=keyboard
@@ -178,10 +184,14 @@ async def _captcha_timeout(
         await session.commit()
 
     mention = build_mention(user_id, pending.get("name", "user"))
+    notice_text = get_i18n().get(notice, lang, user=mention)
+    from bot.emoji import decorate
+
+    notice_text = decorate(notice_text) or notice_text
     await safe_send_message(
         bot,
         chat_id,
-        get_i18n().get(notice, lang, user=mention),
+        notice_text,
         parse_mode="HTML",
     )
 
@@ -198,6 +208,7 @@ async def on_new_members(message: types.Message, **data: Any) -> None:
     redis: RedisClient = data["redis"]
     session_maker = data["session_maker"]
     translate = data["_"]
+    translate_raw = data.get("_raw")
     lang = data["lang"]
 
     if settings.get("delete_service_messages"):
@@ -222,7 +233,15 @@ async def on_new_members(message: types.Message, **data: Any) -> None:
         started = False
         if settings.get("captcha_enabled"):
             started = await _start_captcha(
-                bot, redis, session_maker, chat, user, settings, translate, lang
+                bot,
+                redis,
+                session_maker,
+                chat,
+                user,
+                settings,
+                translate,
+                lang,
+                translate_raw,
             )
         # Welcome directly when captcha is off, or as a fallback when the bot
         # couldn't enforce the captcha (so the user isn't silently ignored).
@@ -234,6 +253,8 @@ async def on_new_members(message: types.Message, **data: Any) -> None:
 async def on_captcha_answer(callback: types.CallbackQuery, **data: Any) -> None:
     """Verify a captcha button press."""
     translate = data["_"]
+    # Тост/алерт не парсит HTML — _raw, чтобы <tg-emoji> не был виден сырым.
+    translate_raw = data.get("_raw") or translate
     redis: RedisClient = data["redis"]
     bot: Bot = callback.bot
 
@@ -250,7 +271,7 @@ async def on_captcha_answer(callback: types.CallbackQuery, **data: Any) -> None:
 
     # Only the target user may solve their own captcha.
     if callback.from_user.id != user_id:
-        await callback.answer(translate("captcha_not_for_you"), show_alert=True)
+        await callback.answer(translate_raw("captcha_not_for_you"), show_alert=True)
         return
 
     pending = await redis.get_captcha(chat_id, user_id)
@@ -269,7 +290,7 @@ async def on_captcha_answer(callback: types.CallbackQuery, **data: Any) -> None:
         ok = True  # button: pressing it is the proof
 
     if not ok:
-        await callback.answer(translate("captcha_wrong"), show_alert=True)
+        await callback.answer(translate_raw("captcha_wrong"), show_alert=True)
         return
 
     # Atomic claim: Redis DEL returns the number of keys removed, so of two
@@ -283,7 +304,7 @@ async def on_captcha_answer(callback: types.CallbackQuery, **data: Any) -> None:
     message_id = pending.get("message_id")
     if message_id:
         await safe_delete_message(bot, chat_id, message_id)
-    await callback.answer(translate("captcha_success", user=""))
+    await callback.answer(translate_raw("captcha_success", user=""))
 
     settings = data.get("settings")
     if settings and callback.message is not None:
