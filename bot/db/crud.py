@@ -14,6 +14,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.constants import (
+    ACTION_BAN,
     DEFAULT_LANGUAGE,
     TRIGGER_CONTAINS,
     TRIGGER_PATTERN_MAX,
@@ -23,12 +24,14 @@ from bot.db.models import (
     Activity,
     Chat,
     ChatSettings,
+    ChatTopic,
     Federation,
     FederationBan,
     FederationChat,
     ModLog,
     ScamList,
     ScheduledPost,
+    SlowMode,
     Stopword,
     Trigger,
     User,
@@ -162,6 +165,46 @@ def settings_to_dict(settings: ChatSettings) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
+# Slow mode (persistence)
+# --------------------------------------------------------------------------- #
+async def get_slow_mode(session: AsyncSession, chat_id: int) -> SlowMode | None:
+    """Fetch a chat's slow-mode row (or None if never configured)."""
+    return await session.get(SlowMode, chat_id)
+
+
+async def set_slow_mode(
+    session: AsyncSession,
+    chat_id: int,
+    *,
+    enabled: bool | None = None,
+    regular_seconds: int | None = None,
+    wl_seconds: int | None = None,
+    topic_ids: list[int] | None = None,
+) -> SlowMode:
+    """Create or update a chat's slow-mode row (caller commits).
+
+    Like ``update_settings``: only the provided fields are changed, defaults
+    apply on first creation, and the caller owns the commit. ``topic_ids``
+    scopes the rule to forum topics: ``None`` leaves the stored scope
+    unchanged, ``[]``/non-empty list stores that scope explicitly.
+    """
+    slow_mode = await session.get(SlowMode, chat_id)
+    if slow_mode is None:
+        slow_mode = SlowMode(chat_id=chat_id)
+        session.add(slow_mode)
+    if enabled is not None:
+        slow_mode.enabled = enabled
+    if regular_seconds is not None:
+        slow_mode.regular_seconds = regular_seconds
+    if wl_seconds is not None:
+        slow_mode.wl_seconds = wl_seconds
+    if topic_ids is not None:
+        slow_mode.topic_ids = topic_ids
+    await session.flush()
+    return slow_mode
+
+
+# --------------------------------------------------------------------------- #
 # Users
 # --------------------------------------------------------------------------- #
 async def get_user_by_username(session: AsyncSession, username: str) -> User | None:
@@ -262,6 +305,16 @@ async def count_active_warns(session: AsyncSession, chat_id: int, user_id: int) 
             Warn.user_id == user_id,
             Warn.is_active.is_(True),
         )
+    )
+    return int(result.scalar_one())
+
+
+async def count_warns_chat(session: AsyncSession, chat_id: int) -> int:
+    """Count a chat's active warns across all users."""
+    result = await session.execute(
+        select(func.count())
+        .select_from(Warn)
+        .where(Warn.chat_id == chat_id, Warn.is_active.is_(True))
     )
     return int(result.scalar_one())
 
@@ -465,6 +518,43 @@ async def chat_activity_totals(session: AsyncSession, chat_id: int) -> tuple[int
     )
     total, users = result.one()
     return int(total), int(users)
+
+
+# --------------------------------------------------------------------------- #
+# Forum-topic tracking (for broadcasts)
+# --------------------------------------------------------------------------- #
+async def record_topic_seen(
+    session: AsyncSession, chat_id: int, thread_id: int
+) -> ChatTopic:
+    """Upsert a (chat, thread) activity counter — dialect-agnostic.
+
+    First sighting inserts a row with ``message_count=1``; later sightings
+    increment it and bump ``last_seen`` (via ``onupdate``). No commit here —
+    the caller controls the transaction (same pattern as ``ensure_chat``).
+    """
+    result = await session.execute(
+        select(ChatTopic)
+        .where(ChatTopic.chat_id == chat_id, ChatTopic.thread_id == thread_id)
+        .limit(1)
+    )
+    topic = result.scalar_one_or_none()
+    if topic is None:
+        topic = ChatTopic(chat_id=chat_id, thread_id=thread_id, message_count=1)
+        session.add(topic)
+    else:
+        topic.message_count += 1
+    await session.flush()
+    return topic
+
+
+async def list_topics(session: AsyncSession, chat_id: int) -> list[ChatTopic]:
+    """Return a chat's topics, most recently seen first."""
+    result = await session.execute(
+        select(ChatTopic)
+        .where(ChatTopic.chat_id == chat_id)
+        .order_by(ChatTopic.last_seen.desc())
+    )
+    return list(result.scalars().all())
 
 
 # --------------------------------------------------------------------------- #
@@ -701,6 +791,12 @@ async def get_scam_entry(
     return result.scalar_one_or_none()
 
 
+async def list_scam_entries(session: AsyncSession) -> list[ScamList]:
+    """Return all seller-reputation records, ordered by user_id."""
+    result = await session.execute(select(ScamList).order_by(ScamList.user_id))
+    return list(result.scalars().all())
+
+
 async def upsert_scam_entry(
     session: AsyncSession,
     user_id: int,
@@ -751,3 +847,13 @@ async def add_mod_log(
         )
     )
     await session.flush()
+
+
+async def count_bans(session: AsyncSession, chat_id: int) -> int:
+    """Count a chat's ban actions in the moderation log (ACTION_BAN only)."""
+    result = await session.execute(
+        select(func.count())
+        .select_from(ModLog)
+        .where(ModLog.chat_id == chat_id, ModLog.action == ACTION_BAN)
+    )
+    return int(result.scalar_one())

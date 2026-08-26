@@ -1,39 +1,37 @@
 """FastAPI dashboard (Phase 7): Telegram-login auth + per-chat settings.
 
-Отдельное приложение, разделяющее БД с ботом. Права: глобальный ``OWNER_ID``
-управляет всеми чатами; прочие пользователи видят чат, если бот недавно
-закэшировал их админ-статус в Redis (``admin:{chat}:{user}`` = "1"). Изменения
-настроек инвалидируют кэш, поэтому бот подхватывает их сразу.
-
-Ограничение: не-владельцу нужно, чтобы бот увидел его как админа (любое
-действие/сообщение) — тогда чат появится в дашборде.
+Отдельное приложение, разделяющее БД с ботом. Доступ только для владельцев
+из ``ALLOWED_DM_IDS`` (см. ``Settings.allowed_dm_ids``): Telegram Login
+принимается, только если id пользователя есть в списке, иначе — 403. Все
+допущенные id управляют всеми чатами. Прежняя модель с Redis-кэшем админов
+(``admin:{chat}:{user}`` = "1") убрана — дашборд owner-only.
 """
 
 from __future__ import annotations
 
 import html
+import json
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
+from bot.constants import TOGGLE_FIELDS, TOGGLES
 from bot.db import crud
-from bot.web.auth import verify_telegram_login
+from bot.web.auth import verify_telegram_login, verify_telegram_webapp
+
+# Production SPA build (React + Vite). When it exists, "/" serves the SPA and
+# /assets is mounted; otherwise the legacy server-rendered login page below is
+# the fallback (dev without a built frontend). Monkeypatched in tests.
+DIST = Path(__file__).resolve().parent.parent.parent / "web" / "dist"
 
 # Boolean settings the dashboard can toggle (label shown in the UI).
-_TOGGLES: list[tuple[str, str]] = [
-    ("welcome_enabled", "Welcome"),
-    ("captcha_enabled", "Captcha"),
-    ("filter_links", "Link filter"),
-    ("filter_forwards", "Forward filter"),
-    ("filter_stopwords", "Stopword filter"),
-    ("antiflood_enabled", "Anti-flood"),
-    ("newbie_media_enabled", "Newbie media"),
-    ("triggers_enabled", "Triggers"),
-    ("stats_enabled", "Statistics"),
-]
-_TOGGLE_FIELDS = frozenset(field for field, _ in _TOGGLES)
+# Canonical list lives in bot/constants.py (shared with the JSON API).
+_TOGGLES: list[tuple[str, str]] = list(TOGGLES)
+_TOGGLE_FIELDS = TOGGLE_FIELDS
 
 
 def _page(title: str, body: str) -> str:
@@ -64,46 +62,57 @@ def create_app(settings: Any, session_maker: Any, redis: Any) -> FastAPI:
     app.state.session_maker = session_maker
     app.state.redis = redis
 
+    # JSON API for the webapp frontend (auth: same owner allowlist) +
+    # public pre-login endpoints (login config for the SPA login screen).
+    from bot.web.api import public_router, router
+
+    app.include_router(router)
+    app.include_router(public_router)
+
     async def _can_manage(user_id: int, chat_id: int) -> bool:
-        if user_id == settings.OWNER_ID:
-            return True
-        flag = await redis.get(f"admin:{chat_id}:{user_id}")
-        return flag == "1"
+        # Owner-only panel: allowlist members may manage every chat.
+        return user_id in settings.allowed_dm_ids
 
     async def _managed_chats(session: Any, user_id: int) -> list[Any]:
-        chats = await crud.list_active_chats(session)
-        if user_id == settings.OWNER_ID:
-            return chats
-        managed = []
-        for chat in chats:
-            if await redis.get(f"admin:{chat.chat_id}:{user_id}") == "1":
-                managed.append(chat)
-        return managed
+        if user_id not in settings.allowed_dm_ids:
+            return []
+        return await crud.list_active_chats(session)
 
-    @app.get("/", response_class=HTMLResponse)
-    async def index(request: Request) -> HTMLResponse:
-        if _uid(request) is not None:
-            return RedirectResponse("/chats", status_code=303)
-        username = getattr(settings, "WEB_BOT_USERNAME", "")
-        if username:
-            widget = (
-                "<script async src='https://telegram.org/js/telegram-widget.js?22' "
-                f"data-telegram-login='{html.escape(username)}' data-size='large' "
-                "data-auth-url='/auth/telegram'></script>"
+    if DIST.exists():
+        # Production SPA build present → serve the React app. Auth state is
+        # decided client-side via GET /api/me (401 → login screen), so "/"
+        # always returns index.html, even with a session.
+        app.mount("/assets", StaticFiles(directory=DIST / "assets"), name="assets")
+
+        @app.get("/", response_class=FileResponse)
+        async def index_spa() -> FileResponse:
+            return FileResponse(DIST / "index.html")
+    else:
+        # Dev fallback (no built frontend): legacy server-rendered login page.
+        @app.get("/", response_class=HTMLResponse)
+        async def index(request: Request) -> HTMLResponse:
+            if _uid(request) is not None:
+                return RedirectResponse("/chats", status_code=303)
+            username = getattr(settings, "WEB_BOT_USERNAME", "")
+            if username:
+                widget = (
+                    "<script async src='https://telegram.org/js/telegram-widget.js?22' "
+                    f"data-telegram-login='{html.escape(username)}' data-size='large' "
+                    "data-auth-url='/auth/telegram'></script>"
+                )
+            else:
+                widget = (
+                    "<p><em>Set WEB_BOT_USERNAME to enable the Telegram login "
+                    "button.</em></p>"
+                )
+            if getattr(settings, "WEB_DEV_LOGIN", False):
+                widget += (
+                    "<p style='margin-top:1rem'><a href='/dev-login'>"
+                    "🔓 Dev login (local only)</a></p>"
+                )
+            return HTMLResponse(
+                _page("Login", f"<h1>Bot Dashboard</h1><p>Sign in:</p>{widget}")
             )
-        else:
-            widget = (
-                "<p><em>Set WEB_BOT_USERNAME to enable the Telegram login "
-                "button.</em></p>"
-            )
-        if getattr(settings, "WEB_DEV_LOGIN", False):
-            widget += (
-                "<p style='margin-top:1rem'><a href='/dev-login'>"
-                "🔓 Dev login (local only)</a></p>"
-            )
-        return HTMLResponse(
-            _page("Login", f"<h1>Bot Dashboard</h1><p>Sign in:</p>{widget}")
-        )
 
     if getattr(settings, "WEB_DEV_LOGIN", False):
 
@@ -112,19 +121,61 @@ def create_app(settings: Any, session_maker: Any, redis: Any) -> FastAPI:
             """LOCAL DEV ONLY: sign in as OWNER_ID without Telegram."""
             request.session["user_id"] = settings.OWNER_ID
             request.session["name"] = "dev"
-            return RedirectResponse("/chats", status_code=303)
+            return RedirectResponse("/", status_code=303)
 
     @app.get("/auth/telegram")
     async def auth(request: Request) -> Any:
+        # The widget posts the signed fields to this URL (GET for older
+        # versions / direct links); accept both.
         data = dict(request.query_params)
+        if not data:
+            data = {k: str(v) for k, v in (await request.form()).items()}
         if not verify_telegram_login(data, settings.TELEGRAM_BOT_TOKEN):
             return HTMLResponse(
                 _page("Auth failed", "<h1>Authentication failed</h1>"),
                 status_code=401,
             )
+        if int(data["id"]) not in settings.allowed_dm_ids:
+            # Owner-only panel: valid Telegram login, but the user is not in
+            # the allowlist — refuse WITHOUT creating a session.
+            return HTMLResponse(
+                _page(
+                    "Access denied",
+                    "<h1>403 — Доступ только для владельцев</h1>"
+                    "<p>Access denied. Only the owners may use this panel.</p>",
+                ),
+                status_code=403,
+            )
         request.session["user_id"] = int(data["id"])
         request.session["name"] = data.get("first_name", "")
-        return RedirectResponse("/chats", status_code=303)
+        # Back to "/" so the SPA boots and sees the new session via /api/me.
+        return RedirectResponse("/", status_code=303)
+
+    @app.post("/auth/webapp")
+    async def auth_webapp(request: Request) -> Any:
+        """Telegram Mini App login: verify initData and create a session.
+
+        The SPA (opened via the bot's WebApp button) POSTs the raw ``initData``
+        from Telegram; no login form needed. Returns JSON so the frontend can
+        reload and boot with the session.
+        """
+        form = await request.form()
+        init_data = str(form.get("initData") or form.get("init_data") or "")
+        fields = verify_telegram_webapp(init_data, settings.TELEGRAM_BOT_TOKEN)
+        if fields is None:
+            return JSONResponse({"ok": False, "error": "bad_init_data"}, status_code=401)
+        try:
+            user = json.loads(fields.get("user", "{}"))
+        except (TypeError, ValueError):
+            user = {}
+        user_id = int(user.get("id", 0) or 0)
+        if not user_id or user_id not in settings.allowed_dm_ids:
+            return JSONResponse(
+                {"ok": False, "error": "not_allowed"}, status_code=403
+            )
+        request.session["user_id"] = user_id
+        request.session["name"] = str(user.get("first_name", ""))
+        return JSONResponse({"ok": True, "user_id": user_id})
 
     @app.get("/logout")
     async def logout(request: Request) -> Any:
@@ -136,6 +187,15 @@ def create_app(settings: Any, session_maker: Any, redis: Any) -> FastAPI:
         user_id = _uid(request)
         if user_id is None:
             return RedirectResponse("/", status_code=303)
+        if user_id not in settings.allowed_dm_ids:
+            return HTMLResponse(
+                _page(
+                    "Forbidden",
+                    "<h1>403 — Доступ только для владельцев</h1>"
+                    "<p>Access denied. Only the owners may use this panel.</p>",
+                ),
+                status_code=403,
+            )
         async with session_maker() as session:
             managed = await _managed_chats(session, user_id)
         if not managed:

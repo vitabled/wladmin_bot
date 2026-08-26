@@ -123,6 +123,14 @@ def _guards_applicable(message: types.Message, data: dict[str, Any]) -> bool:
 
 @router.message()
 async def on_message(message: types.Message, **data: Any) -> None:
+    # Best-effort forum-topic tracking for broadcasts. Must never break the
+    # moderation pipeline, so failures are swallowed.
+    thread_id = getattr(message, "message_thread_id", None)
+    if message.chat.type in ("group", "supergroup", "channel") and thread_id is not None:
+        try:
+            await crud.record_topic_seen(data["session"], message.chat.id, thread_id)
+        except Exception:  # noqa: BLE001 - recording is best-effort
+            pass
     if _guards_applicable(message, data):
         if await antiflood.enforce_newbie_media(message, data):
             return

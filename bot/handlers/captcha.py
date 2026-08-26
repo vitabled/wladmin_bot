@@ -57,6 +57,7 @@ def _build_keyboard(
         builder.button(
             text=button_label,
             callback_data=f"{_CB_PREFIX}:{chat_id}:{user_id}:ok",
+            icon_custom_emoji_id="5776375003280838798",  # ✅
         )
     return builder.as_markup()
 

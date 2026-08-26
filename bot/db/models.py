@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     DateTime,
@@ -114,6 +115,32 @@ class ChatSettings(Base):
     chat: Mapped[Chat] = relationship(back_populates="settings")
 
 
+class SlowMode(Base):
+    """Per-chat slow-mode persistence (regular vs whitelist intervals).
+
+    ``topic_ids`` scopes the rule to specific forum topics: ``None``/``[]``
+    means the WHOLE chat (all topics + non-forum messages), a non-empty list
+    means the rule applies ONLY to those ``message_thread_id`` values.
+    """
+
+    __tablename__ = "slow_mode"
+
+    chat_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("chats.chat_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    regular_seconds: Mapped[int] = mapped_column(Integer, default=21600)
+    wl_seconds: Mapped[int] = mapped_column(Integer, default=10800)
+    topic_ids: Mapped[list[int] | None] = mapped_column(JSON, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -203,6 +230,29 @@ class Activity(Base):
     message_count: Mapped[int] = mapped_column(BigInteger, default=0)
     last_active_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class ChatTopic(Base):
+    """Per-forum-topic activity (message_count) for topic-aware broadcasts."""
+
+    __tablename__ = "chat_topics"
+    __table_args__ = (
+        UniqueConstraint("chat_id", "thread_id", name="uq_chat_topics_chat_thread"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    chat_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("chats.chat_id", ondelete="CASCADE"),
+        index=True,
+    )
+    thread_id: Mapped[int] = mapped_column(BigInteger)
+    message_count: Mapped[int] = mapped_column(Integer, default=1)
+    last_seen: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
     )
 
 

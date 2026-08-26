@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     # --- Owner ---
     OWNER_ID: int
 
+    # --- Private chat (ЛС) access gate ---
+    # Comma-separated Telegram user IDs allowed to use the bot in private
+    # chats; empty string = everyone (no restriction). Groups are never
+    # restricted. Parsed by the ``allowed_dm_ids`` property.
+    ALLOWED_DM_IDS: str = ""
+
     # --- Database / cache ---
     DATABASE_URL: str
     REDIS_URL: str = "redis://localhost:6379/0"
@@ -73,6 +79,19 @@ class Settings(BaseSettings):
         if lv not in allowed:
             raise ValueError(f"LOG_LEVEL must be one of {sorted(allowed)}, got {v!r}")
         return "warning" if lv == "warn" else lv
+
+    @property
+    def allowed_dm_ids(self) -> tuple[int, ...]:
+        """Parsed allowlist for private chats; empty tuple = no restriction.
+
+        Splits ``ALLOWED_DM_IDS`` on commas, strips whitespace and converts
+        each part to an int. Non-numeric parts raise ValueError at startup.
+        """
+        return tuple(
+            int(part.strip())
+            for part in self.ALLOWED_DM_IDS.split(",")
+            if part.strip()
+        )
 
 
 @lru_cache

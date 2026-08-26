@@ -116,6 +116,22 @@ SCAM_JOINED_RISK_DAYS: Final = 7
 # warning on their first post in the chat.
 SCAM_AUTO_WARN_DAYS: Final = 1
 
+# --- Web dashboard toggles (Phase 7) ------------------------------------
+# Boolean chat settings the web dashboard can toggle; (field, label) pairs.
+# Shared by the HTML panel (bot/web/app.py) and the JSON API (bot/web/api.py).
+TOGGLES: Final = (
+    ("welcome_enabled", "Welcome"),
+    ("captcha_enabled", "Captcha"),
+    ("filter_links", "Link filter"),
+    ("filter_forwards", "Forward filter"),
+    ("filter_stopwords", "Stopword filter"),
+    ("antiflood_enabled", "Anti-flood"),
+    ("newbie_media_enabled", "Newbie media"),
+    ("triggers_enabled", "Triggers"),
+    ("stats_enabled", "Statistics"),
+)
+TOGGLE_FIELDS: Final = frozenset(field for field, _ in TOGGLES)
+
 # --- Default welcome text placeholders ----------------------------------
 DEFAULT_WELCOME_TEXT: Final = "{mention}, добро пожаловать в {chat_title}!"
 

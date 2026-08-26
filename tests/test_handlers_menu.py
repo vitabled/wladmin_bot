@@ -16,31 +16,36 @@ def _translate(key, **kwargs):
 # --------------------------------------------------------------------------- #
 # Keyboard builder (pure)
 # --------------------------------------------------------------------------- #
-def test_build_menu_has_all_toggles_plus_close():
+def test_build_menu_has_all_toggles_no_close():
     kb = menu.build_menu({}, _translate)
     rows = kb.inline_keyboard
-    # one button per toggle + a close button, one per row (adjust(1)).
-    assert len(rows) == len(menu._TOGGLES) + 1
-    assert rows[-1][0].callback_data == "menu:close"
+    # one button per toggle, one per row (adjust(1)) — no close button.
+    assert len(rows) == len(menu._TOGGLES)
+    callbacks = [row[0].callback_data for row in rows]
+    assert all(c.startswith("menu:t:") for c in callbacks)
+    assert "menu:close" not in callbacks
 
 
 def test_build_menu_reflects_state():
     kb = menu.build_menu(
         {"welcome_enabled": True, "captcha_enabled": False}, _translate
     )
-    texts = [row[0].text for row in kb.inline_keyboard]
-    assert any(t.startswith("✅") for t in texts)
-    assert any(t.startswith("❌") for t in texts)
+    icons = [row[0].icon_custom_emoji_id for row in kb.inline_keyboard]
+    assert "5776375003280838798" in icons  # ✅ on
+    assert "5778527486270770928" in icons  # ❌ off
 
 
 def test_build_menu_labels_stay_plain_no_tg_emoji():
     # Кнопки не парсят HTML: подписи обязаны приходить без <tg-emoji> тегов,
-    # иначе пользователь увидит сырую разметку. Marks ✅/❌ тоже plain.
+    # иначе пользователь увидит сырую разметку. Marks ✅/❌ ушли в premium-иконки.
     kb = menu.build_menu({}, _translate)
     for row in kb.inline_keyboard:
         text = row[0].text
         assert "<tg-emoji" not in text
-        assert text.startswith(("✅", "❌")) or "close" in (row[0].callback_data or "")
+        assert row[0].icon_custom_emoji_id in (
+            "5776375003280838798",
+            "5778527486270770928",
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -101,7 +106,11 @@ async def test_unknown_field_ignored(base_data, monkeypatch):
     cb.answer.assert_awaited()
 
 
-async def test_close_deletes_message(base_data):
+async def test_close_callback_is_removed(base_data):
+    # No close buttons: menu:close falls through to the unknown branch and
+    # never deletes the message.
     cb = _menu_callback("menu:close")
     await menu.on_menu_callback(cb, **base_data)
-    cb.message.delete.assert_awaited_once()
+    cb.answer.assert_awaited()
+    cb.message.delete.assert_not_awaited()
+    cb.message.edit_reply_markup.assert_not_awaited()

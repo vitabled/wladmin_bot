@@ -35,16 +35,21 @@ def _reason_suffix(_: Callable[..., str], reason: str | None) -> str:
     return _("reason_suffix", reason=escape_html(reason)) if reason else ""
 
 
-async def _prepare(
+async def prepare_action(
     message: types.Message,
-    command: CommandObject,
+    args: list[str],
     data: dict[str, Any],
     *,
+    chat_id: int,
     allow_duration: bool,
     protect_target: bool,
     need_restrict: bool,
 ) -> Prepared | None:
-    """Run shared guards and resolve target/duration/reason.
+    """Run shared guards and resolve target/duration/reason against a chat.
+
+    ``chat_id`` is explicit so the DM per-group panel can run the exact same
+    guards against a SELECTED group (``message.chat`` is the DM there); for
+    group commands the caller passes ``message.chat.id``.
 
     Returns ``None`` (after replying with a localized error) if any guard
     fails: not-admin actor, bot lacks rights, no/invalid target, or the target
@@ -52,7 +57,6 @@ async def _prepare(
     """
     _ = data["_"]
     bot: Bot = message.bot
-    chat = message.chat
     actor = message.from_user
     session: AsyncSession = data["session"]
 
@@ -67,16 +71,15 @@ async def _prepare(
         message.sender_chat is None
         and not data.get("is_owner")
         and actor is not None
-        and not await is_user_admin(bot, chat.id, actor.id)
+        and not await is_user_admin(bot, chat_id, actor.id)
     ):
         await message.reply(_("error_not_admin"))
         return None
 
-    if need_restrict and not await bot_can_restrict(bot, chat.id, bot.id):
+    if need_restrict and not await bot_can_restrict(bot, chat_id, bot.id):
         await message.reply(_("error_bot_cant_restrict"))
         return None
 
-    args = (command.args or "").split()
     target, err, consumed = await resolve_target(message, args, session, bot)
     if err is not None or target is None:
         await message.reply(_(err or "error_no_target"))
@@ -93,7 +96,7 @@ async def _prepare(
         if target.user_id == data.get("owner_id"):
             await message.reply(_("error_cannot_act_on_owner"))
             return None
-        if await is_user_admin(bot, chat.id, target.user_id):
+        if await is_user_admin(bot, chat_id, target.user_id):
             await message.reply(_("error_cannot_act_on_admin"))
             return None
 
@@ -107,6 +110,32 @@ async def _prepare(
             reason_tokens = rest[1:]
     reason = " ".join(reason_tokens).strip() or None
     return Prepared(target=target, duration=duration, reason=reason)
+
+
+async def _prepare(
+    message: types.Message,
+    command: CommandObject,
+    data: dict[str, Any],
+    *,
+    allow_duration: bool,
+    protect_target: bool,
+    need_restrict: bool,
+    chat_id: int | None = None,
+) -> Prepared | None:
+    """Thin wrapper over :func:`prepare_action` bound to the message's chat.
+
+    ``chat_id`` overrides the message chat (used by the DM panel to act on a
+    selected group); ``None`` keeps the legacy per-command behavior.
+    """
+    return await prepare_action(
+        message,
+        (command.args or "").split(),
+        data,
+        chat_id=message.chat.id if chat_id is None else chat_id,
+        allow_duration=allow_duration,
+        protect_target=protect_target,
+        need_restrict=need_restrict,
+    )
 
 
 @router.message(Command("ban"))

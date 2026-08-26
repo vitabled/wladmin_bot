@@ -32,7 +32,7 @@ from bot.constants import (
     SCAM_SOURCE_VERIFIED,
 )
 from bot.db import crud
-from bot.utils.targets import resolve_target
+from bot.utils.targets import Target, resolve_target
 from bot.utils.text import build_mention, escape_html
 
 logger = logging.getLogger(__name__)
@@ -40,6 +40,17 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 _GROUP_TYPES = ("group", "supergroup")
+
+
+def map_scam_error(error_key: str | None) -> str:
+    """Map a ``resolve_target`` error key to the /scam-flavoured i18n key.
+
+    The generic ``error_no_target`` becomes the friendlier seller-focused
+    variant; every other error (channel / not found) stays as-is.
+    """
+    if error_key == "error_no_target":
+        return "scam_no_target"
+    return error_key or "scam_no_target"
 
 
 async def _risk_factors(
@@ -73,6 +84,76 @@ async def _risk_factors(
     return factors
 
 
+async def build_scam_body(
+    session: AsyncSession,
+    translate: Any,
+    target_user_id: int,
+    target_name: str,
+    *,
+    chat: types.Chat | None = None,
+    bot: Bot | None = None,
+) -> str:
+    """Compute the /scam verdict body for a target (no footer).
+
+    Shared core used by ``/scam``, the DM menu flow AND the JSON API (which
+    has no aiogram ``Message``): scam list → verified list → risk assessment.
+    Returns the localized body WITHOUT the report-this-scammer footer; the
+    caller appends ``scam_footer``.
+
+    ``chat``/``bot`` scope the join-date risk factors: both must be present
+    (the API passes a group chat + ad-hoc bot when rating within a chat);
+    otherwise no risk factors are collected.
+    """
+    entry = await crud.get_scam_entry(session, target_user_id)
+    mention = build_mention(target_user_id, target_name)
+
+    if entry is not None and entry.source == SCAM_SOURCE_SCAM:
+        reason = escape_html(entry.reason) if entry.reason else translate("no_reason")
+        return translate("scam_found", user=mention, reason=reason)
+    if entry is not None and entry.source == SCAM_SOURCE_VERIFIED:
+        return translate("scam_verified", user=mention)
+
+    factors: list[str] = []
+    if chat is not None and bot is not None:
+        factors = await _risk_factors(bot, chat, target_user_id)
+    if factors:
+        # Возраст аккаунта: Telegram не отдаёт дату создания (ни Bot API,
+        # ни MTProto) — провайдер честно вернёт None, пока нет источника.
+        from bot.utils import account_age
+
+        age_days = await account_age.get_account_age_days(target_user_id)
+        if age_days is not None and age_days > account_age.ACCOUNT_AGE_RISK_DAYS:
+            factors.append("scam_risk_age")
+        listed = "\n".join(translate(key) for key in factors)
+        return translate("scam_risk", factors=listed)
+    return translate("scam_ok")
+
+
+async def build_scam_verdict(
+    message: types.Message,
+    target: Target,
+    data: dict[str, Any],
+    *,
+    risk_chat: types.Chat | None = None,
+) -> str:
+    """Compute the /scam verdict body for a resolved target (no footer).
+
+    Thin wrapper over :func:`build_scam_body` for the aiogram flow.
+    ``risk_chat`` scopes the join-date risk factors to a specific chat (the
+    DM panel passes the SELECTED group); ``None`` keeps the message's chat.
+    """
+    _ = data["_"]
+    session: AsyncSession = data["session"]
+    return await build_scam_body(
+        session,
+        _,
+        target.user_id,
+        target.name,
+        chat=risk_chat if risk_chat is not None else message.chat,
+        bot=message.bot,
+    )
+
+
 @router.message(Command("scam"))
 async def cmd_scam(
     message: types.Message, command: CommandObject, **data: Any
@@ -86,14 +167,7 @@ async def cmd_scam(
         message, (command.args or "").split(), session, bot
     )
     if error_key is not None or target is None:
-        # Для /scam общий "error_no_target" заменяем на дружелюбный вариант
-        # про продавца; остальные ошибки (канал/не найдено) — как в модерации.
-        key = (
-            "scam_no_target"
-            if error_key == "error_no_target"
-            else (error_key or "scam_no_target")
-        )
-        await message.reply(_(key))
+        await message.reply(_(map_scam_error(error_key)))
         return
 
     # Если целью оказался сам бот (типичный случай "/scam @lotesadminbot" —
@@ -103,29 +177,7 @@ async def cmd_scam(
         await message.reply(_("scam_no_target"))
         return
 
-    entry = await crud.get_scam_entry(session, target.user_id)
-    mention = build_mention(target.user_id, target.name)
-
-    if entry is not None and entry.source == SCAM_SOURCE_SCAM:
-        reason = escape_html(entry.reason) if entry.reason else _("no_reason")
-        body = _("scam_found", user=mention, reason=reason)
-    elif entry is not None and entry.source == SCAM_SOURCE_VERIFIED:
-        body = _("scam_verified", user=mention)
-    else:
-        factors = await _risk_factors(bot, message.chat, target.user_id)
-        if factors:
-            # Возраст аккаунта: Telegram не отдаёт дату создания (ни Bot API,
-            # ни MTProto) — провайдер честно вернёт None, пока нет источника.
-            from bot.utils import account_age
-
-            age_days = await account_age.get_account_age_days(target.user_id)
-            if age_days is not None and age_days > account_age.ACCOUNT_AGE_RISK_DAYS:
-                factors.append("scam_risk_age")
-            listed = "\n".join(_(key) for key in factors)
-            body = _("scam_risk", factors=listed)
-        else:
-            body = _("scam_ok")
-
+    body = await build_scam_verdict(message, target, data)
     await message.reply(f"{body}\n\n{_('scam_footer')}", parse_mode="HTML")
 
 

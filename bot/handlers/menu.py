@@ -48,12 +48,13 @@ def build_menu(
     """Build the settings keyboard reflecting each toggle's current state."""
     builder = InlineKeyboardBuilder()
     for field, label_key in _TOGGLES:
-        mark = "✅" if settings.get(field) else "❌"
         builder.button(
-            text=f"{mark} {translate(label_key)}",
+            text=translate(label_key),
             callback_data=f"{_PREFIX}:t:{field}",
+            icon_custom_emoji_id=(
+                "5776375003280838798" if settings.get(field) else "5778527486270770928"
+            ),  # ✅ / ❌
         )
-    builder.button(text=translate("menu_close"), callback_data=f"{_PREFIX}:close")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -73,7 +74,7 @@ async def cmd_menu(message: types.Message, **data: Any) -> None:
 
 @router.callback_query(F.data.startswith(f"{_PREFIX}:"))
 async def on_menu_callback(callback: types.CallbackQuery, **data: Any) -> None:
-    """Apply a menu button press: toggle a setting or close the menu."""
+    """Apply a menu button press: toggle a setting."""
     _ = data["_"]
     _raw = data["_raw"]
     if not data.get("is_admin"):
@@ -84,18 +85,21 @@ async def on_menu_callback(callback: types.CallbackQuery, **data: Any) -> None:
     parts = (callback.data or "").split(":")
     action = parts[1] if len(parts) > 1 else ""
 
-    if action == "close":
-        if callback.message is not None:
-            try:
-                await callback.message.delete()
-            except Exception:
-                pass
-        await callback.answer()
-        return
-
-    if action == "t" and len(parts) == 3 and parts[2] in _TOGGLE_FIELDS:
+    if action == "t" and len(parts) in (3, 4) and parts[2] in _TOGGLE_FIELDS:
         field = parts[2]
         chat = data.get("event_chat")
+        if len(parts) == 4:
+            # DM-panel form "menu:t:<field>:<chat_id>": toggle the SELECTED
+            # group's setting. Backward compatible — a malformed or unknown
+            # chat id silently falls back to the event chat.
+            try:
+                explicit_chat_id = int(parts[3])
+            except ValueError:
+                explicit_chat_id = None
+            if explicit_chat_id is not None:
+                explicit_chat = await crud.get_chat(data["session"], explicit_chat_id)
+                if explicit_chat is not None:
+                    chat = explicit_chat
         if chat is None:
             await callback.answer()
             return
