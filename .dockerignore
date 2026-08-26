@@ -15,3 +15,7 @@ logs
 .idea
 .vscode
 README.md
+# Frontend: source deps and local build output are not part of the image
+# context (the compiled SPA is copied from the node stage instead).
+web/node_modules
+web/dist

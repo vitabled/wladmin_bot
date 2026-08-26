@@ -38,6 +38,7 @@ services:
       WEBHOOK_PATH: ${WEBHOOK_PATH:-/webhook}
       BOT_MODE: ${BOT_MODE:-webhook}
       OWNER_ID: ${OWNER_ID}
+      ALLOWED_DM_IDS: ${ALLOWED_DM_IDS:-}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-telegram_bot}
       REDIS_URL: redis://redis:6379/0
       LOG_LEVEL: ${LOG_LEVEL:-info}
@@ -68,6 +69,7 @@ services:
       WEBHOOK_URL: ${WEBHOOK_URL}
       WEBHOOK_SECRET: ${WEBHOOK_SECRET}
       OWNER_ID: ${OWNER_ID}
+      ALLOWED_DM_IDS: ${ALLOWED_DM_IDS:-}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-telegram_bot}
       REDIS_URL: redis://redis:6379/0
       LOG_LEVEL: ${LOG_LEVEL:-info}
@@ -87,60 +89,9 @@ services:
 
   # One-shot: seed a self-signed cert at certbot's live path so nginx can start
   # on :443 before a real Let's Encrypt cert exists. certbot later replaces it.
-  nginx-init:
-    image: alpine:3.20
-    volumes:
-      - certbot_conf:/etc/letsencrypt
-    # Single-line command: a folded (>) block preserved newlines inside the
-    # openssl args and broke it, so keep this on ONE line.
-    command:
-      - sh
-      - -c
-      - "D=/etc/letsencrypt/live/${DOMAIN:-panel.localhost}; [ -f $$D/fullchain.pem ] || { apk add --no-cache openssl && mkdir -p $$D && openssl req -x509 -nodes -newkey rsa:2048 -days 365 -keyout $$D/privkey.pem -out $$D/fullchain.pem -subj /CN=${DOMAIN:-panel.localhost}; }"
-
-  # Reverse proxy: :80 (ACME + redirect) and :443 (TLS). Single domain, path
-  # routing: /webhook → bot:8000, everything else → dashboard:8080.
-  # Reloads every 6h to pick up renewed certs.
-  nginx:
-    image: nginx:1.27-alpine
-    ports:
-      - "80:80"
-      - "443:443"
-    environment:
-      DOMAIN: ${DOMAIN:-panel.localhost}
-    volumes:
-      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./docker/nginx/templates:/etc/nginx/templates:ro
-      - certbot_conf:/etc/nginx/certs:ro
-      - certbot_www:/var/www/certbot:ro
-    depends_on:
-      nginx-init:
-        condition: service_completed_successfully
-      bot:
-        condition: service_started
-      dashboard:
-        condition: service_started
-    # Render templates (the image's entrypoint skips its envsubst step when the
-    # command isn't "nginx"), then reload every 6h to pick up renewed certs.
-    command:
-      - sh
-      - -c
-      - "/docker-entrypoint.d/20-envsubst-on-templates.sh; while :; do sleep 6h & wait $${!}; nginx -s reload; done & exec nginx -g 'daemon off;'"
-
-  # Let's Encrypt: issue the cert once (see CLAUDE.md), then auto-renew every
-  # 12h. A no-op until a real cert is issued for ${DOMAIN}.
-  certbot:
-    image: certbot/certbot:latest
-    volumes:
-      - certbot_conf:/etc/letsencrypt
-      - certbot_www:/var/www/certbot
-    entrypoint: sh
-    command:
-      - -c
-      - "trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot; sleep 12h & wait $${!}; done"
+  # REMOVED 08.2026: host :80/:443 are owned by caddy + smp-server; the panel is
+  # served via caddy (admin.whitelistmarket.lol, Cloudflare edge TLS, flexible).
 
 volumes:
   postgres_data:
   redis_data:
-  certbot_conf:
-  certbot_www:
