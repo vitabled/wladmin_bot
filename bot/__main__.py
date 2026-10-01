@@ -63,7 +63,7 @@ def build_dispatcher(
     dp = Dispatcher(storage=storage)
 
     i18n = get_i18n()
-    observers = (dp.message, dp.edited_message, dp.callback_query)
+    observers = (dp.message, dp.edited_message, dp.callback_query, dp.chat_member)
     for observer in observers:
         # Private-access gate is the OUTERMOST middleware: unlisted users are
         # dropped before the DB session / admin checks / handlers run.

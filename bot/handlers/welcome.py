@@ -61,6 +61,14 @@ async def send_welcome(
     return msg
 
 
+@router.message(F.new_chat_members)
+async def on_members_joined(message: types.Message, **data: Any) -> None:
+    """Only clean up the join service message; chat_member handles the join."""
+    settings = data.get("settings")
+    if settings and settings.get("delete_service_messages"):
+        await safe_delete_message(message.bot, message.chat.id, message.message_id)
+
+
 @router.message(F.left_chat_member)
 async def on_member_left(message: types.Message, **data: Any) -> None:
     """Delete the 'user left' service message when configured."""

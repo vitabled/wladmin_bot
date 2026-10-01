@@ -8,6 +8,8 @@ import secrets
 from typing import Any
 
 from aiogram import Bot, F, Router, types
+from aiogram.filters import ChatMemberUpdatedFilter
+from aiogram.filters.chat_member_updated import ADMINISTRATOR, MEMBER, RESTRICTED
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -23,6 +25,7 @@ from bot.filters.chat_type import IsGroup
 from bot.handlers.welcome import send_welcome
 from bot.i18n.loader import get_i18n
 from bot.services.captcha import CaptchaService
+from bot.services.chat_member_events import classify_transition
 from bot.utils.tasks import spawn
 from bot.utils.telegram import (
     safe_ban_member,
@@ -37,7 +40,7 @@ from bot.utils.text import build_mention, format_duration
 logger = logging.getLogger(__name__)
 
 router = Router()
-router.message.filter(IsGroup())
+router.chat_member.filter(IsGroup())
 
 _CB_PREFIX = "captcha"
 
@@ -197,14 +200,27 @@ async def _captcha_timeout(
     )
 
 
-@router.message(F.new_chat_members)
-async def on_new_members(message: types.Message, **data: Any) -> None:
-    """Route joining users to captcha (if enabled) or welcome."""
+@router.chat_member(ChatMemberUpdatedFilter(MEMBER | RESTRICTED | ADMINISTRATOR))
+async def on_chat_member(event: types.ChatMemberUpdated, **data: Any) -> None:
+    """Route only join transitions, independently of service messages."""
+    if event.new_chat_member.user.is_bot:
+        return
+    if (
+        classify_transition(event.old_chat_member.status, event.new_chat_member.status)
+        != "joined"
+    ):
+        return
+    await _handle_join(event, **data)
+
+
+async def _handle_join(event: types.ChatMemberUpdated, **data: Any) -> None:
+    """Enforce federation bans, mark newbies, then challenge or welcome."""
     settings = data.get("settings")
     if not settings:
         return
-    bot: Bot = message.bot
-    chat = message.chat
+    bot: Bot = event.bot
+    chat = event.chat
+    user = event.new_chat_member.user
     session: AsyncSession = data["session"]
     redis: RedisClient = data["redis"]
     session_maker = data["session_maker"]
@@ -212,42 +228,38 @@ async def on_new_members(message: types.Message, **data: Any) -> None:
     translate_raw = data.get("_raw")
     lang = data["lang"]
 
-    if settings.get("delete_service_messages"):
-        await safe_delete_message(bot, chat.id, message.message_id)
-
     # Phase 8: federation bans are enforced on join for this chat's federation.
     federation = await crud.get_chat_federation(session, chat.id)
-
-    for user in message.new_chat_members or []:
-        if user.is_bot:
-            continue
-        await crud.upsert_user(session, user.id, user.first_name, user.username)
-        if federation is not None and await crud.is_fedbanned(
-            session, federation.id, user.id
-        ):
-            await safe_ban_member(bot, chat.id, user.id)
-            continue
-        if settings.get("newbie_media_enabled"):
-            await redis.mark_newbie(
-                chat.id, user.id, int(settings.get("newbie_period") or 3600)
-            )
-        started = False
-        if settings.get("captcha_enabled"):
-            started = await _start_captcha(
-                bot,
-                redis,
-                session_maker,
-                chat,
-                user,
-                settings,
-                translate,
-                lang,
-                translate_raw,
-            )
-        # Welcome directly when captcha is off, or as a fallback when the bot
-        # couldn't enforce the captcha (so the user isn't silently ignored).
-        if not started:
-            await send_welcome(bot, chat, user, settings, translate)
+    await crud.upsert_user(session, user.id, user.first_name, user.username)
+    if federation is not None and await crud.is_fedbanned(
+        session, federation.id, user.id
+    ):
+        await safe_ban_member(bot, chat.id, user.id)
+        return
+    if settings.get("newbie_media_enabled"):
+        await redis.mark_newbie(
+            chat.id, user.id, int(settings.get("newbie_period") or 3600)
+        )
+    started = False
+    if (
+        settings.get("captcha_enabled")
+        and event.new_chat_member.status != "administrator"
+    ):
+        started = await _start_captcha(
+            bot,
+            redis,
+            session_maker,
+            chat,
+            user,
+            settings,
+            translate,
+            lang,
+            translate_raw,
+        )
+    # Welcome directly when captcha is off, or as a fallback when the bot
+    # couldn't enforce the captcha (so the user isn't silently ignored).
+    if not started:
+        await send_welcome(bot, chat, user, settings, translate)
 
 
 @router.callback_query(F.data.startswith(f"{_CB_PREFIX}:"))
