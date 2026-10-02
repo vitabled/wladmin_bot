@@ -161,6 +161,7 @@ async def api_chat_detail(request: Request, chat_id: int) -> dict[str, Any]:
         "topics": [
             {
                 "thread_id": topic.thread_id,
+                "title": topic.title,
                 "message_count": topic.message_count,
                 "last_seen": topic.last_seen.isoformat() if topic.last_seen else None,
             }

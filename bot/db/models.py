@@ -248,6 +248,10 @@ class ChatTopic(Base):
         index=True,
     )
     thread_id: Mapped[int] = mapped_column(BigInteger)
+    # Human-readable forum topic name, when Telegram told us one
+    # (``forum_topic_created`` / ``forum_topic_edited``). NULL for threads
+    # only ever seen via a regular message.
+    title: Mapped[str | None] = mapped_column(String(128), nullable=True)
     message_count: Mapped[int] = mapped_column(Integer, default=1)
     last_seen: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

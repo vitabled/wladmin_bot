@@ -524,13 +524,18 @@ async def chat_activity_totals(session: AsyncSession, chat_id: int) -> tuple[int
 # Forum-topic tracking (for broadcasts)
 # --------------------------------------------------------------------------- #
 async def record_topic_seen(
-    session: AsyncSession, chat_id: int, thread_id: int
+    session: AsyncSession,
+    chat_id: int,
+    thread_id: int,
+    title: str | None = None,
 ) -> ChatTopic:
     """Upsert a (chat, thread) activity counter — dialect-agnostic.
 
     First sighting inserts a row with ``message_count=1``; later sightings
-    increment it and bump ``last_seen`` (via ``onupdate``). No commit here —
-    the caller controls the transaction (same pattern as ``ensure_chat``).
+    increment it and bump ``last_seen`` (via ``onupdate``). ``title`` (when
+    given) sets/refreshes the stored forum-topic name — a ``None`` title
+    leaves any previously recorded name untouched. No commit here — the
+    caller controls the transaction (same pattern as ``ensure_chat``).
     """
     result = await session.execute(
         select(ChatTopic)
@@ -543,6 +548,31 @@ async def record_topic_seen(
         session.add(topic)
     else:
         topic.message_count += 1
+    if title:
+        topic.title = title[:128]
+    await session.flush()
+    return topic
+
+
+async def set_topic_title(
+    session: AsyncSession, chat_id: int, thread_id: int, title: str
+) -> ChatTopic:
+    """Set/refresh a topic's name without touching its message counter.
+
+    Used for ``forum_topic_edited`` service messages (a rename is not user
+    activity). Missing rows are created with ``message_count=1`` so a rename
+    can never lose the thread. No commit here — the caller controls the tx.
+    """
+    result = await session.execute(
+        select(ChatTopic)
+        .where(ChatTopic.chat_id == chat_id, ChatTopic.thread_id == thread_id)
+        .limit(1)
+    )
+    topic = result.scalar_one_or_none()
+    if topic is None:
+        topic = ChatTopic(chat_id=chat_id, thread_id=thread_id, message_count=1)
+        session.add(topic)
+    topic.title = title[:128]
     await session.flush()
     return topic
 

@@ -28,7 +28,9 @@ to the owner whitelist, so no extra user checks are needed here.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable
+from types import SimpleNamespace
 from typing import Any
 
 from aiogram import Bot, F, Router, types
@@ -134,6 +136,7 @@ class DmSlowMode(StatesGroup):
 
     awaiting_config = State()
     awaiting_topics = State()
+    awaiting_topic_id = State()
 
 
 class DmWl(StatesGroup):
@@ -146,6 +149,7 @@ class DmBroadcast(StatesGroup):
     """FSM for the broadcast text (after topics were picked)."""
 
     awaiting_text = State()
+    awaiting_topic_id = State()
 
 
 def build_main_menu(_raw: Callable[..., str]) -> types.InlineKeyboardMarkup:
@@ -430,6 +434,36 @@ def _bc_text_kb(
     return builder.as_markup()
 
 
+def _topic_label(topic: Any) -> str:
+    """Human label for a tracked topic: its name when known, else ``#id``."""
+    title = (getattr(topic, "title", None) or "").strip()
+    return title or f"#{topic.thread_id}"
+
+
+def _merge_topics(topics: list[Any], selected: list[int]) -> list[Any]:
+    """Topics plus synthetic rows for manually added ids not yet in the DB.
+
+    A thread id typed in by the operator always shows up in the keyboard, even
+    before any message in that topic reached the bot.
+    """
+    known = {topic.thread_id for topic in topics}
+    merged = list(topics)
+    for thread_id in selected:
+        if thread_id not in known:
+            merged.append(
+                SimpleNamespace(thread_id=thread_id, message_count=0, title=None)
+            )
+    return merged
+
+
+def parse_thread_id(text: str) -> int | None:
+    """Extract a thread id from a bare number or a ``t.me/c/.../<id>`` link."""
+    numbers = re.findall(r"\d+", text or "")
+    if not numbers:
+        return None
+    return int(numbers[-1])
+
+
 def _build_topics_kb(
     _raw: Callable[..., str],
     chat_id: int,
@@ -439,9 +473,9 @@ def _build_topics_kb(
     """Topic multi-select keyboard: ✅/⚪ icons per thread + go + home."""
     builder = InlineKeyboardBuilder()
     sel = set(selected)
-    for topic in topics:
+    for topic in _merge_topics(topics, selected):
         builder.button(
-            text=f"#{topic.thread_id}",
+            text=_topic_label(topic),
             callback_data=f"{_PREFIX}:bct:{chat_id}:{topic.thread_id}",
             icon_custom_emoji_id=(
                 _ICON_TOPIC_ON if topic.thread_id in sel else _ICON_TOPIC_OFF
@@ -451,6 +485,14 @@ def _build_topics_kb(
         text=_raw("dm_bc_go"),
         callback_data=f"{_PREFIX}:bcgo:{chat_id}",
         icon_custom_emoji_id="5197269100878907942",  # ✍ (FinanceEmoji)
+    )
+    builder.button(
+        text=_raw("dm_bc_topics_refresh"),
+        callback_data=f"{_PREFIX}:bcr:{chat_id}",
+    )
+    builder.button(
+        text=_raw("dm_bc_topics_add"),
+        callback_data=f"{_PREFIX}:bcadd:{chat_id}",
     )
     builder.button(
         text=_raw("dm_menu_home"),
@@ -469,16 +511,17 @@ def _build_sm_topics_kb(
 ) -> types.InlineKeyboardMarkup:
     """Slow-mode topic multi-select: ✅/☑️ per thread + all/done + nav.
 
-    One row per tracked topic (``✅ #3 · 42 сообщ.``), then «Все ветки»
-    (immediate save with ``topic_ids=[]``), «✅ Готово» (save with the picked
-    threads) and a panel/home nav row.
+    One row per tracked topic (``✅ #3 · 42 сообщ.``, the topic NAME when
+    known), then «Все ветки» (immediate save with ``topic_ids=[]``),
+    «✅ Готово» (save with the picked threads), «🔄 Обновить список» (re-read
+    the DB), «✏️ Добавить ID ветки вручную» and a panel/home nav row.
     """
     builder = InlineKeyboardBuilder()
     sel = set(selected)
-    for topic in topics:
+    for topic in _merge_topics(topics, selected):
         mark = "✅" if topic.thread_id in sel else "☑️"
         builder.button(
-            text=f"{mark} #{topic.thread_id} · {topic.message_count} сообщ.",
+            text=f"{mark} {_topic_label(topic)} · {topic.message_count} сообщ.",
             callback_data=f"{_PREFIX}:smb:{chat_id}:{topic.thread_id}",
         )
     builder.button(
@@ -488,6 +531,14 @@ def _build_sm_topics_kb(
     builder.button(
         text=_raw("dm_sm_topics_done"),
         callback_data=f"{_PREFIX}:smbdone:{chat_id}",
+    )
+    builder.button(
+        text=_raw("dm_sm_topics_refresh"),
+        callback_data=f"{_PREFIX}:smrefresh:{chat_id}",
+    )
+    builder.button(
+        text=_raw("dm_sm_topics_add"),
+        callback_data=f"{_PREFIX}:smadd:{chat_id}",
     )
     builder.adjust(1)
     kb = builder.as_markup()
@@ -506,6 +557,32 @@ def _build_sm_topics_kb(
         ]
     )
     return kb
+
+
+def _build_sm_topics_empty_kb(
+    _raw: Callable[..., str], chat_id: int
+) -> types.InlineKeyboardMarkup:
+    """Hint screen for a forum with no tracked topics yet.
+
+    Telegram gives bots no way to enumerate topics, so instead of silently
+    saving «all topics» we explain how topics show up and offer the ways out:
+    «Все ветки» (explicit whole-chat scope), add an id manually, or go back.
+    """
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=_raw("dm_sm_topics_all"),
+        callback_data=f"{_PREFIX}:smball:{chat_id}",
+    )
+    builder.button(
+        text=_raw("dm_sm_topics_add"),
+        callback_data=f"{_PREFIX}:smadd:{chat_id}",
+    )
+    builder.button(
+        text=_raw("dm_sm_topics_back"),
+        callback_data=f"{_PREFIX}:smback:{chat_id}",
+    )
+    builder.adjust(1)
+    return builder.as_markup()
 
 
 def _sm_topics_summary(_: Callable[..., str], topic_ids: list[int] | None) -> str:
@@ -669,6 +746,14 @@ async def on_dm_callback(
         await _dm_broadcast_go(callback, action[5:], state, _, _raw)
         return
 
+    if action.startswith("bcr:"):
+        await _dm_bc_refresh(callback, action, state, _, _raw, session)
+        return
+
+    if action.startswith("bcadd:"):
+        await _dm_bc_add_id(callback, action, state, _, _raw, session)
+        return
+
     # Slow-mode topic multi-select callbacks MUST be matched before the
     # generic ``sm:`` prefix (``smb:``/``smball:``/``smbdone:`` start with it).
     if action.startswith("smb:"):
@@ -681,6 +766,18 @@ async def on_dm_callback(
 
     if action.startswith("smbdone:"):
         await _dm_sm_topics_done(callback, action, state, _, _raw, session)
+        return
+
+    if action.startswith("smrefresh:"):
+        await _dm_sm_refresh(callback, action, state, _, _raw, session)
+        return
+
+    if action.startswith("smadd:"):
+        await _dm_sm_add_id(callback, action, state, _, _raw, session)
+        return
+
+    if action.startswith("smback:"):
+        await _dm_sm_back(callback, action, state, _, _raw, session)
         return
 
     if action.startswith("sm:"):
@@ -1111,6 +1208,89 @@ async def _dm_sm_topics_all(
     )
 
 
+async def _dm_sm_refresh(
+    callback: types.CallbackQuery,
+    action: str,
+    state: FSMContext,
+    _: Callable[..., str],
+    _raw: Callable[..., str],
+    session: AsyncSession,
+) -> None:
+    """«🔄 Обновить список»: re-read the DB and redraw the topic keyboard."""
+    parts = action.split(":")
+    if len(parts) != 2:
+        await callback.answer()
+        return
+    try:
+        chat_id = int(parts[1])
+    except ValueError:
+        await callback.answer()
+        return
+    selected = list((await state.get_data()).get("selected_topics", []))
+    topics = await crud.list_topics(session, chat_id)
+    if not topics and not selected:
+        await _edit_or_answer(
+            callback, _("dm_sm_topics_empty"), _build_sm_topics_empty_kb(_raw, chat_id)
+        )
+    else:
+        await _edit_or_answer(
+            callback,
+            _("dm_sm_topics_prompt"),
+            _build_sm_topics_kb(_raw, chat_id, topics, selected),
+        )
+    await callback.answer()
+
+
+async def _dm_sm_add_id(
+    callback: types.CallbackQuery,
+    action: str,
+    state: FSMContext,
+    _: Callable[..., str],
+    _raw: Callable[..., str],
+    session: AsyncSession,
+) -> None:
+    """«✏️ Добавить ID ветки вручную» → ask for the id (FSM step)."""
+    parts = action.split(":")
+    if len(parts) != 2:
+        await callback.answer()
+        return
+    try:
+        chat_id = int(parts[1])
+    except ValueError:
+        await callback.answer()
+        return
+    if await state.get_state() != DmSlowMode.awaiting_topics:
+        await callback.answer()
+        return
+    await state.update_data(chat_id=chat_id)
+    await state.set_state(DmSlowMode.awaiting_topic_id)
+    await _edit_or_answer(callback, _("dm_topic_id_prompt"), _home_kb(_raw))
+    await callback.answer()
+
+
+async def _dm_sm_back(
+    callback: types.CallbackQuery,
+    action: str,
+    state: FSMContext,
+    _: Callable[..., str],
+    _raw: Callable[..., str],
+    session: AsyncSession,
+) -> None:
+    """«Назад» from the empty-topics hint: drop the FSM and show the panel."""
+    parts = action.split(":")
+    if len(parts) != 2:
+        await callback.answer()
+        return
+    try:
+        chat_id = int(parts[1])
+    except ValueError:
+        await callback.answer()
+        return
+    await state.clear()
+    await _dm_group_panel(callback, str(chat_id), _, _raw, session)
+    await callback.answer()
+
+
 async def _dm_sm_topics_done(
     callback: types.CallbackQuery,
     action: str,
@@ -1308,6 +1488,67 @@ async def _dm_broadcast_toggle(
             )
         except Exception:
             logger.debug("dm.bc_toggle_edit_failed", exc_info=True)
+    await callback.answer()
+
+
+async def _dm_bc_refresh(
+    callback: types.CallbackQuery,
+    action: str,
+    state: FSMContext,
+    _: Callable[..., str],
+    _raw: Callable[..., str],
+    session: AsyncSession,
+) -> None:
+    """«🔄 Обновить список» for the broadcast topic picker (re-read the DB)."""
+    parts = action.split(":")
+    if len(parts) != 2:
+        await callback.answer()
+        return
+    try:
+        chat_id = int(parts[1])
+    except ValueError:
+        await callback.answer()
+        return
+    chat = await crud.get_chat(session, chat_id)
+    if chat is None:
+        await _edit_or_answer(callback, _("dm_panel_missing"), _home_kb(_raw))
+        await callback.answer()
+        return
+    title = (chat.title or "").strip() or str(chat_id)
+    selected = list((await state.get_data()).get("selected", []))
+    topics = await crud.list_topics(session, chat_id)
+    if not topics and not selected:
+        await _edit_or_answer(callback, _("dm_bc_no_topics"), _bc_groups_kb(_raw))
+    else:
+        await _edit_or_answer(
+            callback,
+            _("dm_bc_topics_title", title=title),
+            _build_topics_kb(_raw, chat_id, topics, selected),
+        )
+    await callback.answer()
+
+
+async def _dm_bc_add_id(
+    callback: types.CallbackQuery,
+    action: str,
+    state: FSMContext,
+    _: Callable[..., str],
+    _raw: Callable[..., str],
+    session: AsyncSession,
+) -> None:
+    """«✏️ Добавить ID ветки вручную» for broadcasts → ask for the id (FSM)."""
+    parts = action.split(":")
+    if len(parts) != 2:
+        await callback.answer()
+        return
+    try:
+        chat_id = int(parts[1])
+    except ValueError:
+        await callback.answer()
+        return
+    await state.update_data(bc_chat_id=chat_id)
+    await state.set_state(DmBroadcast.awaiting_topic_id)
+    await _edit_or_answer(callback, _("dm_topic_id_prompt"), _home_kb(_raw))
     await callback.answer()
 
 
@@ -1626,10 +1867,10 @@ async def dm_slow_mode_config(
 
     Bad input keeps the FSM state so the user can retry (or bail out via the
     panel keyboard). Hours are clamped to [1, 720]. «выкл» saves immediately;
-    «вкл» stores the pending config and — when the group has tracked forum
-    topics — moves to the topic multi-select (``DmSlowMode.awaiting_topics``)
-    before saving; without tracked topics it saves right away with an
-    all-topics scope (``topic_ids=[]``).
+    «вкл» stores the pending config and moves to the topic multi-select
+    (``DmSlowMode.awaiting_topics``) before saving. When the forum has no
+    tracked topics yet the multi-select is replaced by a hint screen — the bot
+    never silently saves «all topics» on the user's behalf.
     """
     _ = data["_"]
     _raw = data["_raw"]
@@ -1687,23 +1928,11 @@ async def dm_slow_mode_config(
     regular_seconds = regular_h * 3600
     wl_seconds = wl_h * 3600
 
-    # Tracked topics exist → topic multi-select step; otherwise save now.
+    # Tracked topics exist → topic multi-select step. An EMPTY list must not
+    # silently save «all topics» (the user never chose that): show a hint
+    # screen explaining that Telegram doesn't hand bots the topic list, with
+    # «Все ветки» / «Добавить ID» / «Назад» instead.
     topics = await crud.list_topics(session, chat_id)
-    if not topics:
-        await _dm_sm_save(
-            session,
-            state,
-            lambda text, kb_: message.answer(text, reply_markup=kb_),
-            _,
-            _raw,
-            chat_id,
-            enabled=True,
-            regular_seconds=regular_seconds,
-            wl_seconds=wl_seconds,
-            topic_ids=[],
-        )
-        return
-
     current = list(cfg.topic_ids) if (cfg is not None and cfg.topic_ids) else []
     await state.set_state(DmSlowMode.awaiting_topics)
     await state.update_data(
@@ -1715,9 +1944,88 @@ async def dm_slow_mode_config(
             "wl": wl_seconds,
         },
     )
+    if not topics:
+        await message.answer(
+            _("dm_sm_topics_empty"),
+            reply_markup=_build_sm_topics_empty_kb(_raw, chat_id),
+        )
+        return
     await message.answer(
         _("dm_sm_topics_prompt"),
         reply_markup=_build_sm_topics_kb(_raw, chat_id, topics, current),
+    )
+
+
+@router.message(IsPrivate(), F.text, StateFilter(DmSlowMode.awaiting_topic_id))
+async def dm_sm_topic_id(
+    message: types.Message, state: FSMContext, **data: Any
+) -> None:
+    """Manual thread-id entry for the slow-mode topic scope.
+
+    Accepts a bare number or a ``t.me/c/<...>/<id>`` link (last number wins).
+    On success the id joins the selection and the picker is redrawn; bad input
+    keeps the FSM state so the user can retry.
+    """
+    _ = data["_"]
+    _raw = data["_raw"]
+    session: AsyncSession = data["session"]
+
+    state_data = await state.get_data()
+    chat_id = state_data.get("chat_id")
+    if chat_id is None:
+        await state.clear()
+        await message.answer(_("dm_menu_title"), reply_markup=build_main_menu(_raw))
+        return
+
+    thread_id = parse_thread_id(message.text or "")
+    if thread_id is None:
+        await message.answer(_("dm_topic_id_bad"), reply_markup=_home_kb(_raw))
+        return
+
+    selected = list(state_data.get("selected_topics", []))
+    if thread_id not in selected:
+        selected.append(thread_id)
+    await state.set_state(DmSlowMode.awaiting_topics)
+    await state.update_data(chat_id=chat_id, selected_topics=selected)
+    topics = await crud.list_topics(session, chat_id)
+    await message.answer(
+        _("dm_sm_topics_prompt"),
+        reply_markup=_build_sm_topics_kb(_raw, chat_id, topics, selected),
+    )
+
+
+@router.message(IsPrivate(), F.text, StateFilter(DmBroadcast.awaiting_topic_id))
+async def dm_bc_topic_id(
+    message: types.Message, state: FSMContext, **data: Any
+) -> None:
+    """Manual thread-id entry for the broadcast topic selection."""
+    _ = data["_"]
+    _raw = data["_raw"]
+    session: AsyncSession = data["session"]
+
+    state_data = await state.get_data()
+    chat_id = state_data.get("bc_chat_id")
+    if chat_id is None:
+        await state.clear()
+        await message.answer(_("dm_menu_title"), reply_markup=build_main_menu(_raw))
+        return
+
+    thread_id = parse_thread_id(message.text or "")
+    if thread_id is None:
+        await message.answer(_("dm_topic_id_bad"), reply_markup=_home_kb(_raw))
+        return
+
+    selected = list(state_data.get("selected", []))
+    if thread_id not in selected:
+        selected.append(thread_id)
+    await state.set_state(None)
+    await state.update_data(bc_chat_id=chat_id, selected=selected)
+    topics = await crud.list_topics(session, chat_id)
+    chat = await crud.get_chat(session, chat_id)
+    title = ((chat.title if chat else None) or "").strip() or str(chat_id)
+    await message.answer(
+        _("dm_bc_topics_title", title=title),
+        reply_markup=_build_topics_kb(_raw, chat_id, topics, selected),
     )
 
 

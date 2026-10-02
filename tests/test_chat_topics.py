@@ -1,9 +1,8 @@
-"""Tests for forum-topic tracking (Task 4): crud upsert + antispam hook."""
+"""Tests for forum-topic tracking: crud upsert + stored topic titles."""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import func, select
@@ -12,8 +11,6 @@ from sqlalchemy.pool import StaticPool
 
 from bot.db import crud
 from bot.db.models import Base, Chat, ChatTopic
-from bot.handlers import antispam
-from tests.conftest import make_chat, make_message
 
 
 @pytest.fixture
@@ -39,7 +36,7 @@ async def _row_count(session) -> int:
 
 
 # --------------------------------------------------------------------------- #
-# crud.record_topic_seen / list_topics
+# crud.record_topic_seen / set_topic_title / list_topics
 # --------------------------------------------------------------------------- #
 async def test_record_topic_seen_creates_then_increments(db_session):
     first = await crud.record_topic_seen(db_session, -1001, 42)
@@ -58,6 +55,37 @@ async def test_record_topic_seen_distinct_threads(db_session):
     assert await _row_count(db_session) == 2
 
 
+async def test_record_topic_seen_stores_title(db_session):
+    topic = await crud.record_topic_seen(db_session, -1001, 42, title="Обсуждения")
+    assert topic.title == "Обсуждения"
+
+
+async def test_record_topic_seen_none_title_keeps_existing(db_session):
+    await crud.record_topic_seen(db_session, -1001, 42, title="Обсуждения")
+    topic = await crud.record_topic_seen(db_session, -1001, 42)
+    assert topic.title == "Обсуждения"  # a plain message never clears the name
+    assert topic.message_count == 2
+
+
+async def test_record_topic_seen_truncates_long_title(db_session):
+    topic = await crud.record_topic_seen(db_session, -1001, 42, title="x" * 300)
+    assert len(topic.title) == 128
+
+
+async def test_set_topic_title_updates_without_counting(db_session):
+    await crud.record_topic_seen(db_session, -1001, 42, title="Old")
+    topic = await crud.set_topic_title(db_session, -1001, 42, "New")
+    assert topic.title == "New"
+    assert topic.message_count == 1  # a rename is not user activity
+
+
+async def test_set_topic_title_creates_missing_row(db_session):
+    topic = await crud.set_topic_title(db_session, -1001, 77, "Fresh")
+    assert topic.thread_id == 77
+    assert topic.title == "Fresh"
+    assert await _row_count(db_session) == 1
+
+
 async def test_list_topics_ordered_by_last_seen_desc(db_session):
     # Explicit last_seen at insert time (server_default only fires when the
     # column is omitted) makes the ordering deterministic.
@@ -73,6 +101,7 @@ async def test_list_topics_ordered_by_last_seen_desc(db_session):
                 chat_id=-1001,
                 thread_id=2,
                 message_count=5,
+                title="Topic two",
                 last_seen=datetime(2026, 1, 3, tzinfo=UTC),
             ),
             ChatTopic(
@@ -87,71 +116,9 @@ async def test_list_topics_ordered_by_last_seen_desc(db_session):
     topics = await crud.list_topics(db_session, -1001)
     assert [t.thread_id for t in topics] == [2, 3, 1]
     assert topics[0].message_count == 5
+    assert topics[0].title == "Topic two"
+    assert topics[1].title is None
 
 
 async def test_list_topics_empty(db_session):
     assert await crud.list_topics(db_session, -1001) == []
-
-
-# --------------------------------------------------------------------------- #
-# Antispam catch-all hook
-# --------------------------------------------------------------------------- #
-def _mock_pipeline(monkeypatch):
-    """Isolate on_message to the recording hook (mocks the rest of the flow)."""
-    process = AsyncMock(return_value=False)
-    monkeypatch.setattr(antispam, "_process", process)
-    monkeypatch.setattr(antispam.stats, "record_activity", AsyncMock())
-    monkeypatch.setattr(
-        antispam.scam, "maybe_warn_newbie", AsyncMock(return_value=False)
-    )
-    monkeypatch.setattr(antispam.triggers, "maybe_reply", AsyncMock())
-    return process
-
-
-async def test_hook_records_forum_message(base_data, monkeypatch):
-    _mock_pipeline(monkeypatch)
-    record = AsyncMock()
-    monkeypatch.setattr(crud, "record_topic_seen", record)
-    msg = make_message(chat=make_chat(-1001, "supergroup"))
-    msg.message_thread_id = 42
-
-    await antispam.on_message(msg, **base_data)
-
-    record.assert_awaited_once_with(base_data["session"], -1001, 42)
-
-
-async def test_hook_skips_non_forum_message(base_data, monkeypatch):
-    _mock_pipeline(monkeypatch)
-    record = AsyncMock()
-    monkeypatch.setattr(crud, "record_topic_seen", record)
-    msg = make_message(chat=make_chat(-1001, "supergroup"))
-    msg.message_thread_id = None
-
-    await antispam.on_message(msg, **base_data)
-
-    record.assert_not_awaited()
-
-
-async def test_hook_skips_non_group_message(base_data, monkeypatch):
-    _mock_pipeline(monkeypatch)
-    record = AsyncMock()
-    monkeypatch.setattr(crud, "record_topic_seen", record)
-    msg = make_message(chat=make_chat(-1001, "private"))
-    msg.message_thread_id = 42
-
-    await antispam.on_message(msg, **base_data)
-
-    record.assert_not_awaited()
-
-
-async def test_hook_failure_does_not_break_pipeline(base_data, monkeypatch):
-    process = _mock_pipeline(monkeypatch)
-    monkeypatch.setattr(
-        crud, "record_topic_seen", AsyncMock(side_effect=Exception("db down"))
-    )
-    msg = make_message(chat=make_chat(-1001, "supergroup"))
-    msg.message_thread_id = 42
-
-    # Must not raise; the rest of the pipeline still runs.
-    await antispam.on_message(msg, **base_data)
-    process.assert_awaited_once()

@@ -36,6 +36,7 @@ from bot.middlewares.i18n import I18nMiddleware
 from bot.middlewares.private_access import PrivateAccessMiddleware
 from bot.middlewares.settings import SettingsMiddleware
 from bot.middlewares.slow_mode import SlowModeMiddleware
+from bot.middlewares.topic_tracker import TopicTrackerMiddleware
 from bot.scheduler import run_scheduler
 from bot.utils.tasks import cancel_all, spawn
 
@@ -72,6 +73,11 @@ def build_dispatcher(
         observer.outer_middleware(SettingsMiddleware(redis, cache_ttl))
         observer.outer_middleware(I18nMiddleware(i18n))
         observer.outer_middleware(AdminMiddleware(redis, owner_id))
+
+    # Forum-topic bookkeeping: records thread sightings (and topic names from
+    # forum_topic_created/edited) in its OWN committed session, right after the
+    # update session is opened, so a later handler failure cannot lose it.
+    dp.message.outer_middleware(TopicTrackerMiddleware(session_maker))
 
     # Slow mode is the INNERMOST message middleware (runs after the admin
     # check above) and only on dp.message: edited messages and callbacks are

@@ -175,7 +175,10 @@ def test_api_chat_detail_200(client, monkeypatch):
         AsyncMock(
             return_value=[
                 SimpleNamespace(
-                    thread_id=5, message_count=3, last_seen=datetime(2026, 1, 2, tzinfo=UTC)
+                    thread_id=5,
+                    title="Обсуждения",
+                    message_count=3,
+                    last_seen=datetime(2026, 1, 2, tzinfo=UTC),
                 )
             ]
         ),
@@ -196,7 +199,12 @@ def test_api_chat_detail_200(client, monkeypatch):
     assert data["warns"] == 1
     assert data["banned"] == 2
     assert data["topics"] == [
-        {"thread_id": 5, "message_count": 3, "last_seen": "2026-01-02T00:00:00+00:00"}
+        {
+            "thread_id": 5,
+            "title": "Обсуждения",
+            "message_count": 3,
+            "last_seen": "2026-01-02T00:00:00+00:00",
+        }
     ]
 
 

@@ -204,39 +204,30 @@ async def test_slow_mode_callback_sets_state(base_data, fsm, monkeypatch):
     cb.answer.assert_awaited_once()
 
 
-async def test_slow_mode_on_sets_config_and_clears_state(base_data, fsm, monkeypatch):
+async def test_slow_mode_on_empty_topics_shows_hint_not_saved(
+    base_data, fsm, monkeypatch
+):
+    """No tracked topics → hint screen, NOT a silent «all topics» save."""
     await fsm.set_state(dm_menu.DmSlowMode.awaiting_config)
     await fsm.update_data(chat_id=GROUP_CHAT_ID)
     monkeypatch.setattr(crud, "get_slow_mode", AsyncMock(return_value=None))
     monkeypatch.setattr(crud, "list_topics", AsyncMock(return_value=[]))
     set_mock = AsyncMock()
     monkeypatch.setattr(crud, "set_slow_mode", set_mock)
-    calls = _capturing_translator(base_data)
 
     msg = make_message(text="вкл 6 3", chat=_dm_chat())
     await dm_menu.dm_slow_mode_config(msg, state=fsm, **base_data)
 
-    set_mock.assert_awaited_once_with(
-        base_data["session"],
-        GROUP_CHAT_ID,
-        enabled=True,
-        regular_seconds=21600,
-        wl_seconds=10800,
-        topic_ids=[],  # no tracked topics → whole chat
-    )
-    base_data["session"].commit.assert_awaited_once()
-    assert await fsm.get_state() is None  # state cleared
-    saved_kwargs = next(v for k, v in calls if k == "dm_sm_saved")
-    assert saved_kwargs == {
-        "regular": 6,
-        "wl": 3,
-        "topics": "dm_sm_topics_summary_all",
-    }
+    set_mock.assert_not_awaited()  # the bug: it used to save topic_ids=[]
+    base_data["session"].commit.assert_not_awaited()
+    assert msg.answer.await_args.args[0] == "dm_sm_topics_empty"
     kb = msg.answer.await_args.kwargs["reply_markup"]
     assert [row[0].callback_data for row in kb.inline_keyboard] == [
-        f"dm:g:{GROUP_CHAT_ID}",
-        "dm:menu",
+        f"dm:smball:{GROUP_CHAT_ID}",
+        f"dm:smadd:{GROUP_CHAT_ID}",
+        f"dm:smback:{GROUP_CHAT_ID}",
     ]
+    assert await fsm.get_state() == dm_menu.DmSlowMode.awaiting_topics
 
 
 async def test_slow_mode_off_disables(base_data, fsm, monkeypatch):
@@ -295,20 +286,16 @@ async def test_slow_mode_clamps_hours(base_data, fsm, monkeypatch):
     await fsm.set_state(dm_menu.DmSlowMode.awaiting_config)
     await fsm.update_data(chat_id=GROUP_CHAT_ID)
     monkeypatch.setattr(crud, "get_slow_mode", AsyncMock(return_value=None))
-    monkeypatch.setattr(crud, "list_topics", AsyncMock(return_value=[]))
+    monkeypatch.setattr(crud, "list_topics", AsyncMock(return_value=_topics(3)))
     set_mock = AsyncMock()
     monkeypatch.setattr(crud, "set_slow_mode", set_mock)
     msg = make_message(text="вкл 9999 0", chat=_dm_chat())
     await dm_menu.dm_slow_mode_config(msg, state=fsm, **base_data)
-    # clamped to [1, 720]
-    set_mock.assert_awaited_once_with(
-        base_data["session"],
-        GROUP_CHAT_ID,
-        enabled=True,
-        regular_seconds=720 * 3600,
-        wl_seconds=1 * 3600,
-        topic_ids=[],
-    )
+    # clamped to [1, 720] and held as pending until the topic step is done
+    set_mock.assert_not_awaited()
+    pending = (await fsm.get_data())["pending_sm"]
+    assert pending["regular"] == 720 * 3600
+    assert pending["wl"] == 1 * 3600
 
 
 # --- slow-mode topic multi-select (DmSlowMode.awaiting_topics) ------------- #
@@ -342,8 +329,10 @@ async def test_slow_mode_on_with_topics_goes_to_awaiting_topics(
     assert rows[0][0].text == f"☑️ #3 · {3 * 10} сообщ."
     assert rows[3][0].callback_data == f"dm:smball:{GROUP_CHAT_ID}"
     assert rows[4][0].callback_data == f"dm:smbdone:{GROUP_CHAT_ID}"
+    assert rows[5][0].callback_data == f"dm:smrefresh:{GROUP_CHAT_ID}"
+    assert rows[6][0].callback_data == f"dm:smadd:{GROUP_CHAT_ID}"
     # nav row: panel back + home
-    assert [btn.callback_data for btn in rows[5]] == [
+    assert [btn.callback_data for btn in rows[7]] == [
         f"dm:g:{GROUP_CHAT_ID}",
         "dm:menu",
     ]
@@ -768,7 +757,9 @@ async def test_broadcast_topics_checkboxes(base_data, fsm, monkeypatch):
     assert rows[2][0].callback_data == f"dm:bcgo:{GROUP_CHAT_ID}"
     assert rows[2][0].text == "dm_bc_go"
     assert rows[2][0].icon_custom_emoji_id == "5197269100878907942"  # ✍
-    assert rows[3][0].callback_data == "dm:menu"
+    assert rows[3][0].callback_data == f"dm:bcr:{GROUP_CHAT_ID}"
+    assert rows[4][0].callback_data == f"dm:bcadd:{GROUP_CHAT_ID}"
+    assert rows[5][0].callback_data == "dm:menu"
     state_data = await fsm.get_data()
     assert state_data["bc_chat_id"] == GROUP_CHAT_ID
     assert state_data["selected"] == []
