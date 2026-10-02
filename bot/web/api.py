@@ -32,6 +32,7 @@ _SLOW_MODE_DEFAULTS = {
     "regular_seconds": 21600,
     "wl_seconds": 10800,
     "topic_ids": None,
+    "topics": [],
 }
 
 
@@ -141,6 +142,7 @@ async def api_chat_detail(request: Request, chat_id: int) -> dict[str, Any]:
         warns = await crud.count_warns_chat(session, chat_id)
         banned = await crud.count_bans(session, chat_id)
         topics = await crud.list_topics(session, chat_id)
+        topic_slow = await crud.list_slow_mode_topics(session, chat_id)
     return {
         "chat_id": chat.chat_id,
         "title": chat.title,
@@ -151,6 +153,15 @@ async def api_chat_detail(request: Request, chat_id: int) -> dict[str, Any]:
                 "regular_seconds": slow.regular_seconds,
                 "wl_seconds": slow.wl_seconds,
                 "topic_ids": slow.topic_ids,
+                "topics": [
+                    {
+                        "thread_id": thread_id,
+                        "enabled": override.enabled,
+                        "regular_seconds": override.regular_seconds,
+                        "wl_seconds": override.wl_seconds,
+                    }
+                    for thread_id, override in topic_slow.items()
+                ],
             }
             if slow is not None
             else dict(_SLOW_MODE_DEFAULTS)

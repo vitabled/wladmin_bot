@@ -548,9 +548,9 @@ async def test_panel_slowmode_sets_fsm(base_data, fsm, monkeypatch):
     assert state_data["chat_id"] == GROUP_CHAT_ID
     assert cb.message.edit_text.await_args.args[0] == "dm_sm_prompt"
     kb = cb.message.edit_text.await_args.kwargs["reply_markup"]
-    assert [row[0].callback_data for row in kb.inline_keyboard] == [
-        f"dm:g:{GROUP_CHAT_ID}",
-        "dm:menu",
+    assert [[btn.callback_data for btn in row] for row in kb.inline_keyboard] == [
+        [f"dm:smtl:{GROUP_CHAT_ID}"],
+        [f"dm:g:{GROUP_CHAT_ID}", "dm:menu"],
     ]
     cb.answer.assert_awaited_once()
 

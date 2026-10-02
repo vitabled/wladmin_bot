@@ -52,6 +52,10 @@ def patch_crud(monkeypatch):
         "list_topics",
         "get_slow_mode",
         "set_slow_mode",
+        "list_slow_mode_topics",
+        "get_slow_mode_topic",
+        "set_slow_mode_topic",
+        "clear_slow_mode_topic",
         "list_scam_entries",
         "get_users_by_ids",
         "chat_activity_totals",
@@ -66,6 +70,10 @@ def patch_crud(monkeypatch):
         monkeypatch.setattr(crud, name, AsyncMock())
     monkeypatch.setattr(crud, "get_scam_entry", AsyncMock(return_value=None))
     monkeypatch.setattr(crud, "get_user_by_username", AsyncMock(return_value=None))
+    # Per-topic slow-mode overrides: a real query returns a dict / None, so the
+    # default mocks must not leak MagicMock values into the keyboards.
+    monkeypatch.setattr(crud, "list_slow_mode_topics", AsyncMock(return_value={}))
+    monkeypatch.setattr(crud, "get_slow_mode_topic", AsyncMock(return_value=None))
 
 
 @pytest.fixture
@@ -197,9 +205,9 @@ async def test_slow_mode_callback_sets_state(base_data, fsm, monkeypatch):
     assert (await fsm.get_data())["chat_id"] == GROUP_CHAT_ID
     assert cb.message.edit_text.await_args.args[0] == "dm_sm_prompt"
     kb = cb.message.edit_text.await_args.kwargs["reply_markup"]
-    assert [row[0].callback_data for row in kb.inline_keyboard] == [
-        f"dm:g:{GROUP_CHAT_ID}",
-        "dm:menu",
+    assert [[btn.callback_data for btn in row] for row in kb.inline_keyboard] == [
+        [f"dm:smtl:{GROUP_CHAT_ID}"],
+        [f"dm:g:{GROUP_CHAT_ID}", "dm:menu"],
     ]
     cb.answer.assert_awaited_once()
 

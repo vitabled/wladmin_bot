@@ -15,16 +15,12 @@ from bot.db.models import Base, Chat, ChatTopic
 
 @pytest.fixture
 async def db_session():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool
-    )
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as session:
-        session.add(
-            Chat(chat_id=-1001, title="Test", type="supergroup", language="ru")
-        )
+        session.add(Chat(chat_id=-1001, title="Test", type="supergroup", language="ru"))
         await session.commit()
         yield session
     await engine.dispose()

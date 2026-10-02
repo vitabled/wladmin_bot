@@ -124,11 +124,13 @@ def _config(enabled=True, regular=21600, wl=10800, topic_ids=None) -> SimpleName
     )
 
 
-def _patch_crud(monkeypatch, config, scam_entry=None):
+def _patch_crud(monkeypatch, config, scam_entry=None, topic_override=None):
     get_slow_mode = AsyncMock(return_value=config)
     get_scam_entry = AsyncMock(return_value=scam_entry)
+    get_slow_mode_topic = AsyncMock(return_value=topic_override)
     monkeypatch.setattr(crud, "get_slow_mode", get_slow_mode)
     monkeypatch.setattr(crud, "get_scam_entry", get_scam_entry)
+    monkeypatch.setattr(crud, "get_slow_mode_topic", get_slow_mode_topic)
     return get_slow_mode, get_scam_entry
 
 

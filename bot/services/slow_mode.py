@@ -11,6 +11,11 @@ non-empty list restricts enforcement to those ``message_thread_id`` values
 (``topic`` 0 for non-forum messages is NOT covered), while an empty/``None``
 scope applies to the whole chat (all topics + non-forum messages).
 
+``SlowModeTopic`` rows override that for a single thread: ``enabled=False``
+exempts the topic even inside the scope, and its own ``regular_seconds`` /
+``wl_seconds`` replace the chat values (NULL inherits them). Overrides are
+consulted only while the chat-level row is enabled.
+
 Fail-open by design: non-group chats, bots/anonymous senders, disabled config
 and non-positive intervals are always allowed. Callers must not let slow mode
 break the message pipeline.
@@ -56,30 +61,52 @@ async def check_and_record(bot, message, data: dict) -> bool:
     if data.get("is_admin") or data.get("is_owner"):
         return True
 
-    # (d) The chat must have slow mode enabled with a usable interval.
+    # (d) The chat must have slow mode enabled. «выкл» on the chat wins over
+    # every per-topic override, so admins keep one global switch.
     config = await crud.get_slow_mode(data["session"], message.chat.id)
     if config is None or not config.enabled:
         return True
-    if config.regular_seconds <= 0 and config.wl_seconds <= 0:
-        return True
 
-    # (e) Topic scope: a non-empty topic_ids list restricts the rule to those
-    # threads; anything else (other topics, non-forum topic 0) is allowed and
-    # NOT recorded. Empty/None scope = whole chat, as before.
-    if config.topic_ids:
-        topic = message.message_thread_id or 0
-        if topic not in config.topic_ids:
+    # (e) A per-topic override (forum threads only) comes first: its own
+    # on/off switch, and its own intervals with NULL meaning «inherit the chat
+    # value». Without a row the legacy chat scope applies — a non-empty
+    # topic_ids list restricts the rule to those threads, while other topics
+    # and non-forum topic 0 are allowed and NOT recorded.
+    topic = message.message_thread_id or 0
+    override = (
+        await crud.get_slow_mode_topic(data["session"], message.chat.id, topic)
+        if topic
+        else None
+    )
+    if override is not None:
+        if not override.enabled:
             return True
+        regular = (
+            override.regular_seconds
+            if override.regular_seconds is not None
+            else config.regular_seconds
+        )
+        wl = (
+            override.wl_seconds
+            if override.wl_seconds is not None
+            else config.wl_seconds
+        )
+    else:
+        if config.topic_ids and topic not in config.topic_ids:
+            return True
+        regular, wl = config.regular_seconds, config.wl_seconds
+
+    if regular <= 0 and wl <= 0:
+        return True
 
     # (f) Role decides the interval: verified sellers get the WL allowance.
     entry = await crud.get_scam_entry(data["session"], user.id)
     is_wl = entry is not None and entry.source == SCAM_SOURCE_VERIFIED
-    interval = config.wl_seconds if is_wl else config.regular_seconds
+    interval = wl if is_wl else regular
     if interval <= 0:
         return True
 
     # (g) Enforce: at most one message per interval per chat+topic+user.
-    topic = message.message_thread_id or 0
     key = f"{_KEY_PREFIX}{message.chat.id}:{topic}:{user.id}"
     now = int(time.time())
     last = await data["redis"].get(key)

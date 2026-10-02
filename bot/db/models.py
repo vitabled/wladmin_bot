@@ -141,6 +141,35 @@ class SlowMode(Base):
     )
 
 
+class SlowModeTopic(Base):
+    """Per-topic slow-mode override (forum threads only).
+
+    A row tunes the chat-level :class:`SlowMode` for one ``message_thread_id``:
+    ``enabled=False`` exempts that topic even when the chat rule (or its scope)
+    covers it, and a non-NULL interval replaces the chat default while a NULL
+    one inherits it. Rows only matter while the chat-level rule is enabled —
+    «выкл» on the chat still switches slow mode off everywhere.
+    """
+
+    __tablename__ = "slow_mode_topics"
+
+    chat_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("chats.chat_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    thread_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # NULL = inherit the chat-level interval (0 is a real value = unlimited).
+    regular_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    wl_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class User(Base):
     __tablename__ = "users"
 

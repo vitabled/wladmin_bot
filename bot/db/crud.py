@@ -32,6 +32,7 @@ from bot.db.models import (
     ScamList,
     ScheduledPost,
     SlowMode,
+    SlowModeTopic,
     Stopword,
     Trigger,
     User,
@@ -202,6 +203,80 @@ async def set_slow_mode(
         slow_mode.topic_ids = topic_ids
     await session.flush()
     return slow_mode
+
+
+# --------------------------------------------------------------------------- #
+# Slow mode: per-topic overrides (forum threads)
+# --------------------------------------------------------------------------- #
+# «Не трогать колонку» для nullable-полей переопределения, где None сам по
+# себе значим (= наследовать интервал чата). Обычный None так выразить нельзя.
+UNSET: Any = object()
+
+
+async def list_slow_mode_topics(
+    session: AsyncSession, chat_id: int
+) -> dict[int, SlowModeTopic]:
+    """Map ``thread_id -> SlowModeTopic`` overrides stored for one chat."""
+    result = await session.execute(
+        select(SlowModeTopic)
+        .where(SlowModeTopic.chat_id == chat_id)
+        .order_by(SlowModeTopic.thread_id)
+    )
+    return {topic.thread_id: topic for topic in result.scalars().all()}
+
+
+async def get_slow_mode_topic(
+    session: AsyncSession, chat_id: int, thread_id: int
+) -> SlowModeTopic | None:
+    """Fetch one topic override (None = the topic inherits the chat rule)."""
+    return await session.get(SlowModeTopic, (chat_id, thread_id))
+
+
+async def set_slow_mode_topic(
+    session: AsyncSession,
+    chat_id: int,
+    thread_id: int,
+    *,
+    enabled: bool | None = None,
+    regular_seconds: Any = UNSET,
+    wl_seconds: Any = UNSET,
+) -> SlowModeTopic:
+    """Create or update a per-topic override (caller commits).
+
+    ``enabled=None`` leaves the switch untouched (True on first creation).
+    ``regular_seconds``/``wl_seconds`` take :data:`UNSET` for «leave as is»,
+    ``None`` to store NULL (inherit the chat interval) or an int to pin the
+    topic's own interval — 0 stays a real value (unlimited).
+    """
+    topic = await session.get(SlowModeTopic, (chat_id, thread_id))
+    if topic is None:
+        topic = SlowModeTopic(chat_id=chat_id, thread_id=thread_id)
+        session.add(topic)
+    if enabled is not None:
+        topic.enabled = enabled
+    if regular_seconds is not UNSET:
+        topic.regular_seconds = regular_seconds
+    if wl_seconds is not UNSET:
+        topic.wl_seconds = wl_seconds
+    await session.flush()
+    return topic
+
+
+async def clear_slow_mode_topic(
+    session: AsyncSession, chat_id: int, thread_id: int
+) -> bool:
+    """Delete a topic override so it inherits the chat rule again.
+
+    Returns True when a row was removed. No commit — the caller owns the tx.
+    """
+    result = await session.execute(
+        delete(SlowModeTopic).where(
+            SlowModeTopic.chat_id == chat_id,
+            SlowModeTopic.thread_id == thread_id,
+        )
+    )
+    await session.flush()
+    return bool(result.rowcount)
 
 
 # --------------------------------------------------------------------------- #

@@ -130,13 +130,17 @@ class DmSlowMode(StatesGroup):
     """FSM for the per-group slow-mode config (``dm:sm:<chat_id>``).
 
     ``awaiting_config`` parses the ``вкл|выкл [hours] [hours]`` line;
-    ``awaiting_topics`` is the topic multi-select step shown after «вкл»
-    when the group has tracked forum topics.
+    ``awaiting_topics`` is the topic list step (scope toggles + per-topic
+    ⚙️ buttons) shown after «вкл» and from the entry screen;
+    ``awaiting_topic_id`` accepts a hand-typed thread id; and
+    ``awaiting_topic_params`` parses per-topic intervals
+    (``6 3`` | ``вкл 6 3`` | ``выкл`` | ``сброс``).
     """
 
     awaiting_config = State()
     awaiting_topics = State()
     awaiting_topic_id = State()
+    awaiting_topic_params = State()
 
 
 class DmWl(StatesGroup):
@@ -213,6 +217,7 @@ _ICON_BACK = "5877629862306385808"  # ◀
 _ICON_HOME = "5967822972931542886"  # 🏠
 _ICON_TOPIC_OFF = "5352618591961226857"  # ⚪ (whiteemojikwii)
 _ICON_TOPIC_ON = "5776375003280838798"  # ✅
+_ICON_SETTINGS = "5877260593903177342"  # ⚙
 
 
 def _back_kb(_raw: Callable[..., str]) -> types.InlineKeyboardMarkup:
@@ -503,46 +508,94 @@ def _build_topics_kb(
     return builder.as_markup()
 
 
+def _sm_topic_status(_raw: Callable[..., str], override: Any) -> str:
+    """Short per-topic mark for the list: «· ⛔» off here, «· ⚙️» own params."""
+    if override is None:
+        return ""
+    if not override.enabled:
+        return f" · {_raw('dm_sm_topic_status_off')}"
+    return f" · {_raw('dm_sm_topic_status_own')}"
+
+
+def _topic_params_button(
+    _raw: Callable[..., str], chat_id: int, thread_id: int
+) -> types.InlineKeyboardButton:
+    """«⚙️» button opening the per-topic slow-mode screen."""
+    return types.InlineKeyboardButton(
+        text=_raw("dm_sm_topic_params"),
+        callback_data=f"{_PREFIX}:smt:{chat_id}:{thread_id}",
+        icon_custom_emoji_id=_ICON_SETTINGS,  # ⚙
+    )
+
+
 def _build_sm_topics_kb(
     _raw: Callable[..., str],
     chat_id: int,
     topics: list[Any],
     selected: list[int],
+    overrides: dict[int, Any] | None = None,
 ) -> types.InlineKeyboardMarkup:
-    """Slow-mode topic multi-select: ✅/☑️ per thread + all/done + nav.
+    """Slow-mode topic list: ``[✅/☑️ topic] [⚙️]`` per thread + all/done + nav.
 
-    One row per tracked topic (``✅ #3 · 42 сообщ.``, the topic NAME when
-    known), then «Все ветки» (immediate save with ``topic_ids=[]``),
-    «✅ Готово» (save with the picked threads), «🔄 Обновить список» (re-read
-    the DB), «✏️ Добавить ID ветки вручную» and a panel/home nav row.
+    Every topic row carries its own parameters button (``dm:smt:``), so each
+    thread can be tuned without touching the chat-wide config. The leading
+    mark is the chat scope (✅ = inside it); ``overrides`` appends «· ⛔» (rule
+    off in that topic) or «· ⚙️» (own intervals) to the label.
+
+    Then «Все ветки» (immediate save with ``topic_ids=[]``), «✅ Готово» (save
+    with the picked threads), «🔄 Обновить список» (re-read the DB),
+    «✏️ Добавить ID ветки вручную» and a panel/home nav row.
     """
-    builder = InlineKeyboardBuilder()
+    overrides = overrides or {}
     sel = set(selected)
+    rows: list[list[types.InlineKeyboardButton]] = []
     for topic in _merge_topics(topics, selected):
         mark = "✅" if topic.thread_id in sel else "☑️"
-        builder.button(
-            text=f"{mark} {_topic_label(topic)} · {topic.message_count} сообщ.",
-            callback_data=f"{_PREFIX}:smb:{chat_id}:{topic.thread_id}",
+        rows.append(
+            [
+                types.InlineKeyboardButton(
+                    text=(
+                        f"{mark} {_topic_label(topic)} · {topic.message_count} сообщ."
+                        f"{_sm_topic_status(_raw, overrides.get(topic.thread_id))}"
+                    ),
+                    callback_data=f"{_PREFIX}:smb:{chat_id}:{topic.thread_id}",
+                ),
+                _topic_params_button(_raw, chat_id, topic.thread_id),
+            ]
         )
-    builder.button(
-        text=_raw("dm_sm_topics_all"),
-        callback_data=f"{_PREFIX}:smball:{chat_id}",
+    rows.append(
+        [
+            types.InlineKeyboardButton(
+                text=_raw("dm_sm_topics_all"),
+                callback_data=f"{_PREFIX}:smball:{chat_id}",
+            )
+        ]
     )
-    builder.button(
-        text=_raw("dm_sm_topics_done"),
-        callback_data=f"{_PREFIX}:smbdone:{chat_id}",
+    rows.append(
+        [
+            types.InlineKeyboardButton(
+                text=_raw("dm_sm_topics_done"),
+                callback_data=f"{_PREFIX}:smbdone:{chat_id}",
+            )
+        ]
     )
-    builder.button(
-        text=_raw("dm_sm_topics_refresh"),
-        callback_data=f"{_PREFIX}:smrefresh:{chat_id}",
+    rows.append(
+        [
+            types.InlineKeyboardButton(
+                text=_raw("dm_sm_topics_refresh"),
+                callback_data=f"{_PREFIX}:smrefresh:{chat_id}",
+            )
+        ]
     )
-    builder.button(
-        text=_raw("dm_sm_topics_add"),
-        callback_data=f"{_PREFIX}:smadd:{chat_id}",
+    rows.append(
+        [
+            types.InlineKeyboardButton(
+                text=_raw("dm_sm_topics_add"),
+                callback_data=f"{_PREFIX}:smadd:{chat_id}",
+            )
+        ]
     )
-    builder.adjust(1)
-    kb = builder.as_markup()
-    kb.inline_keyboard.append(
+    rows.append(
         [
             types.InlineKeyboardButton(
                 text=_raw("dm_panel_back"),
@@ -556,7 +609,154 @@ def _build_sm_topics_kb(
             ),
         ]
     )
-    return kb
+    return types.InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _build_sm_entry_kb(
+    _raw: Callable[..., str], chat_id: int
+) -> types.InlineKeyboardMarkup:
+    """Slow-mode entry screen: open the per-topic list, or leave to the panel.
+
+    The per-topic list is the primary way in — the typed chat-wide prompt is
+    still there for the defaults, but the topics no longer require typing.
+    """
+    return types.InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                types.InlineKeyboardButton(
+                    text=_raw("dm_sm_topics_open"),
+                    callback_data=f"{_PREFIX}:smtl:{chat_id}",
+                    icon_custom_emoji_id=_ICON_SETTINGS,  # ⚙
+                )
+            ],
+            [
+                types.InlineKeyboardButton(
+                    text=_raw("dm_panel_back"),
+                    callback_data=f"{_PREFIX}:g:{chat_id}",
+                    icon_custom_emoji_id=_ICON_BACK,  # ◀
+                ),
+                types.InlineKeyboardButton(
+                    text=_raw("dm_menu_home"),
+                    callback_data=f"{_PREFIX}:menu",
+                    icon_custom_emoji_id=_ICON_HOME,  # 🏠
+                ),
+            ],
+        ]
+    )
+
+
+def _sm_topic_screen_text(
+    _: Callable[..., str], cfg: Any, override: Any, label: str
+) -> str:
+    """Body of the per-topic screen: the topic's state + chat-wide defaults."""
+    chat_regular = (cfg.regular_seconds // 3600) if cfg is not None else 0
+    chat_wl = (cfg.wl_seconds // 3600) if cfg is not None else 0
+    if cfg is None or not cfg.enabled:
+        state = _("dm_sm_topic_state_chat_off")
+    elif override is None:
+        state = _("dm_sm_topic_state_inherit", regular=chat_regular, wl=chat_wl)
+    elif not override.enabled:
+        state = _("dm_sm_topic_state_off")
+    else:
+        regular = (
+            override.regular_seconds
+            if override.regular_seconds is not None
+            else cfg.regular_seconds
+        )
+        wl = (
+            override.wl_seconds
+            if override.wl_seconds is not None
+            else cfg.wl_seconds
+        )
+        if regular == cfg.regular_seconds and wl == cfg.wl_seconds:
+            state = _("dm_sm_topic_state_inherit", regular=chat_regular, wl=chat_wl)
+        else:
+            state = _("dm_sm_topic_state_own", regular=regular // 3600, wl=wl // 3600)
+    return _(
+        "dm_sm_topic_screen",
+        topic=label,
+        state=state,
+        regular=chat_regular,
+        wl=chat_wl,
+    )
+
+
+def _build_sm_topic_kb(
+    _raw: Callable[..., str],
+    chat_id: int,
+    thread_id: int,
+    override: Any,
+) -> types.InlineKeyboardMarkup:
+    """Per-topic slow-mode keyboard: switch, own intervals, reset, nav.
+
+    The switch flips only this thread («⛔ Выключить здесь» / «✅ Включить
+    здесь»), «⚙️ Свои интервалы» opens the typed prompt and «↩️ Как в чате»
+    (only when a row exists) drops the override.
+    """
+    off_here = override is not None and override.enabled
+    rows: list[list[types.InlineKeyboardButton]] = [
+        [
+            types.InlineKeyboardButton(
+                text=_raw(
+                    "dm_sm_topic_switch_off" if off_here else "dm_sm_topic_switch_on"
+                ),
+                callback_data=f"{_PREFIX}:smtx:{chat_id}:{thread_id}",
+            )
+        ],
+        [
+            types.InlineKeyboardButton(
+                text=_raw("dm_sm_topic_set"),
+                callback_data=f"{_PREFIX}:smtp:{chat_id}:{thread_id}",
+                icon_custom_emoji_id=_ICON_SETTINGS,  # ⚙
+            )
+        ],
+    ]
+    if override is not None:
+        rows.append(
+            [
+                types.InlineKeyboardButton(
+                    text=_raw("dm_sm_topic_reset"),
+                    callback_data=f"{_PREFIX}:smtr:{chat_id}:{thread_id}",
+                )
+            ]
+        )
+    rows.append(
+        [
+            types.InlineKeyboardButton(
+                text=_raw("dm_sm_topic_back"),
+                callback_data=f"{_PREFIX}:smtl:{chat_id}",
+                icon_custom_emoji_id=_ICON_BACK,  # ◀
+            ),
+            types.InlineKeyboardButton(
+                text=_raw("dm_menu_home"),
+                callback_data=f"{_PREFIX}:menu",
+                icon_custom_emoji_id=_ICON_HOME,  # 🏠
+            ),
+        ]
+    )
+    return types.InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _build_sm_topic_prompt_kb(
+    _raw: Callable[..., str], chat_id: int, thread_id: int
+) -> types.InlineKeyboardMarkup:
+    """Bail-out keyboard for the typed per-topic interval prompt."""
+    return types.InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                types.InlineKeyboardButton(
+                    text=_raw("dm_sm_topic_back"),
+                    callback_data=f"{_PREFIX}:smt:{chat_id}:{thread_id}",
+                    icon_custom_emoji_id=_ICON_BACK,  # ◀
+                ),
+                types.InlineKeyboardButton(
+                    text=_raw("dm_menu_home"),
+                    callback_data=f"{_PREFIX}:menu",
+                    icon_custom_emoji_id=_ICON_HOME,  # 🏠
+                ),
+            ]
+        ]
+    )
 
 
 def _build_sm_topics_empty_kb(
@@ -778,6 +978,26 @@ async def on_dm_callback(
 
     if action.startswith("smback:"):
         await _dm_sm_back(callback, action, state, _, _raw, session)
+        return
+
+    if action.startswith("smtl:"):
+        await _dm_sm_topics_list(callback, action, state, _, _raw, session)
+        return
+
+    if action.startswith("smtx:"):
+        await _dm_sm_topic_switch(callback, action, state, _, _raw, session)
+        return
+
+    if action.startswith("smtp:"):
+        await _dm_sm_topic_set(callback, action, state, _, _raw, session)
+        return
+
+    if action.startswith("smtr:"):
+        await _dm_sm_topic_reset(callback, action, state, _, _raw, session)
+        return
+
+    if action.startswith("smt:"):
+        await _dm_sm_topic(callback, action, state, _, _raw, session)
         return
 
     if action.startswith("sm:"):
@@ -1082,7 +1302,7 @@ async def _dm_slow_mode(
     await state.set_state(DmSlowMode.awaiting_config)
     await state.update_data(chat_id=chat_id)
     await _edit_or_answer(
-        callback, _("dm_sm_prompt", current=current), _panel_kb(_raw, chat_id)
+        callback, _("dm_sm_prompt", current=current), _build_sm_entry_kb(_raw, chat_id)
     )
     await callback.answer()
 
@@ -1162,10 +1382,13 @@ async def _dm_sm_topic_toggle(
         selected.append(thread_id)
     await state.update_data(selected_topics=selected)
     topics = await crud.list_topics(session, chat_id)
+    overrides = await crud.list_slow_mode_topics(session, chat_id)
     if callback.message is not None:
         try:
             await callback.message.edit_reply_markup(
-                reply_markup=_build_sm_topics_kb(_raw, chat_id, topics, selected)
+                reply_markup=_build_sm_topics_kb(
+                    _raw, chat_id, topics, selected, overrides
+                )
             )
         except Exception:
             logger.debug("dm.sm_toggle_edit_failed", exc_info=True)
@@ -1228,6 +1451,7 @@ async def _dm_sm_refresh(
         return
     selected = list((await state.get_data()).get("selected_topics", []))
     topics = await crud.list_topics(session, chat_id)
+    overrides = await crud.list_slow_mode_topics(session, chat_id)
     if not topics and not selected:
         await _edit_or_answer(
             callback, _("dm_sm_topics_empty"), _build_sm_topics_empty_kb(_raw, chat_id)
@@ -1236,7 +1460,7 @@ async def _dm_sm_refresh(
         await _edit_or_answer(
             callback,
             _("dm_sm_topics_prompt"),
-            _build_sm_topics_kb(_raw, chat_id, topics, selected),
+            _build_sm_topics_kb(_raw, chat_id, topics, selected, overrides),
         )
     await callback.answer()
 
@@ -1327,6 +1551,191 @@ async def _dm_sm_topics_done(
         wl_seconds=int(pending.get("wl", 10800)),
         topic_ids=selected,
     )
+
+
+# --------------------------------------------------------------------------- #
+# Медленный режим: параметры ОТДЕЛЬНОЙ ветки
+# (dm:smtl:<chat> — список, dm:smt:<chat>:<thread> — экран ветки,
+#  dm:smtx: — переключатель, dm:smtp: — свои интервалы, dm:smtr: — как в чате)
+# --------------------------------------------------------------------------- #
+def _sm_ids(action: str, count: int) -> list[int] | None:
+    """Parse the numeric tail of a callback action (``smt:<chat>:<thread>``)."""
+    parts = action.split(":")
+    if len(parts) != count + 1:
+        return None
+    try:
+        return [int(part) for part in parts[1:]]
+    except ValueError:
+        return None
+
+
+async def _sm_topic_label(session: AsyncSession, chat_id: int, thread_id: int) -> str:
+    """Heading for a topic: its stored name, or «#<thread_id>» when unknown."""
+    for topic in await crud.list_topics(session, chat_id):
+        if topic.thread_id == thread_id:
+            return _topic_label(topic)
+    return f"#{thread_id}"
+
+
+async def _sm_show_topic(
+    callback: types.CallbackQuery,
+    chat_id: int,
+    thread_id: int,
+    _: Callable[..., str],
+    _raw: Callable[..., str],
+    session: AsyncSession,
+) -> None:
+    """Draw the per-topic slow-mode screen (current state + buttons)."""
+    cfg = await crud.get_slow_mode(session, chat_id)
+    override = await crud.get_slow_mode_topic(session, chat_id, thread_id)
+    label = await _sm_topic_label(session, chat_id, thread_id)
+    await _edit_or_answer(
+        callback,
+        _sm_topic_screen_text(_, cfg, override, label),
+        _build_sm_topic_kb(_raw, chat_id, thread_id, override),
+    )
+
+
+async def _dm_sm_topics_list(
+    callback: types.CallbackQuery,
+    action: str,
+    state: FSMContext,
+    _: Callable[..., str],
+    _raw: Callable[..., str],
+    session: AsyncSession,
+) -> None:
+    """«⚙️ Ветки и их параметры»: the topic list with a ⚙️ per thread.
+
+    Reachable straight from the slow-mode entry screen (no typing needed).
+    Sets ``awaiting_topics`` seeded with the chat-level config, so the «Все
+    ветки» / «✅ Готово» / «✏️ Добавить ID» buttons keep working from here as
+    they do right after «вкл».
+    """
+    ids = _sm_ids(action, 1)
+    if ids is None:
+        await callback.answer()
+        return
+    chat_id = ids[0]
+    cfg = await crud.get_slow_mode(session, chat_id)
+    topics = await crud.list_topics(session, chat_id)
+    overrides = await crud.list_slow_mode_topics(session, chat_id)
+    selected = list(cfg.topic_ids) if cfg is not None and cfg.topic_ids else []
+    await state.set_state(DmSlowMode.awaiting_topics)
+    await state.update_data(
+        chat_id=chat_id,
+        selected_topics=selected,
+        pending_sm={
+            "enabled": cfg.enabled if cfg is not None else True,
+            "regular": cfg.regular_seconds if cfg is not None else 21600,
+            "wl": cfg.wl_seconds if cfg is not None else 10800,
+        },
+    )
+    if not topics and not selected:
+        await _edit_or_answer(
+            callback, _("dm_sm_topics_empty"), _build_sm_topics_empty_kb(_raw, chat_id)
+        )
+    else:
+        await _edit_or_answer(
+            callback,
+            _("dm_sm_topics_prompt"),
+            _build_sm_topics_kb(_raw, chat_id, topics, selected, overrides),
+        )
+    await callback.answer()
+
+
+async def _dm_sm_topic(
+    callback: types.CallbackQuery,
+    action: str,
+    state: FSMContext,
+    _: Callable[..., str],
+    _raw: Callable[..., str],
+    session: AsyncSession,
+) -> None:
+    """Per-topic slow-mode screen (``dm:smt:<chat_id>:<thread_id>``)."""
+    ids = _sm_ids(action, 2)
+    if ids is None:
+        await callback.answer()
+        return
+    chat_id, thread_id = ids
+    await _sm_show_topic(callback, chat_id, thread_id, _, _raw, session)
+    await callback.answer()
+
+
+async def _dm_sm_topic_switch(
+    callback: types.CallbackQuery,
+    action: str,
+    state: FSMContext,
+    _: Callable[..., str],
+    _raw: Callable[..., str],
+    session: AsyncSession,
+) -> None:
+    """«Включить/выключить здесь»: flip the per-topic switch (``dm:smtx:``).
+
+    A missing row counts as «включено» (the topic follows the chat), so the
+    first press stores an explicit off-override. The scope toggle in the list
+    (``dm:smb:``) is a different thing — see ``_dm_sm_topic_toggle``.
+    """
+    ids = _sm_ids(action, 2)
+    if ids is None:
+        await callback.answer()
+        return
+    chat_id, thread_id = ids
+    override = await crud.get_slow_mode_topic(session, chat_id, thread_id)
+    # No row / row off → «включить здесь»; row on → «выключить здесь».
+    await crud.set_slow_mode_topic(
+        session,
+        chat_id,
+        thread_id,
+        enabled=override is not None and not override.enabled,
+    )
+    await session.commit()
+    await _sm_show_topic(callback, chat_id, thread_id, _, _raw, session)
+    await callback.answer()
+
+
+async def _dm_sm_topic_set(
+    callback: types.CallbackQuery,
+    action: str,
+    state: FSMContext,
+    _: Callable[..., str],
+    _raw: Callable[..., str],
+    session: AsyncSession,
+) -> None:
+    """«⚙️ Свои интервалы»: ask for the per-topic hours (``dm:smtp:``)."""
+    ids = _sm_ids(action, 2)
+    if ids is None:
+        await callback.answer()
+        return
+    chat_id, thread_id = ids
+    label = await _sm_topic_label(session, chat_id, thread_id)
+    await state.set_state(DmSlowMode.awaiting_topic_params)
+    await state.update_data(chat_id=chat_id, thread_id=thread_id)
+    await _edit_or_answer(
+        callback,
+        _("dm_sm_topic_params_prompt", topic=label),
+        _build_sm_topic_prompt_kb(_raw, chat_id, thread_id),
+    )
+    await callback.answer()
+
+
+async def _dm_sm_topic_reset(
+    callback: types.CallbackQuery,
+    action: str,
+    state: FSMContext,
+    _: Callable[..., str],
+    _raw: Callable[..., str],
+    session: AsyncSession,
+) -> None:
+    """«↩️ Как в чате»: drop the override row so the topic inherits again."""
+    ids = _sm_ids(action, 2)
+    if ids is None:
+        await callback.answer()
+        return
+    chat_id, thread_id = ids
+    await crud.clear_slow_mode_topic(session, chat_id, thread_id)
+    await session.commit()
+    await _sm_show_topic(callback, chat_id, thread_id, _, _raw, session)
+    await callback.answer()
 
 
 # --------------------------------------------------------------------------- #
@@ -1934,6 +2343,7 @@ async def dm_slow_mode_config(
     # «Все ветки» / «Добавить ID» / «Назад» instead.
     topics = await crud.list_topics(session, chat_id)
     current = list(cfg.topic_ids) if (cfg is not None and cfg.topic_ids) else []
+    overrides = await crud.list_slow_mode_topics(session, chat_id)
     await state.set_state(DmSlowMode.awaiting_topics)
     await state.update_data(
         chat_id=chat_id,
@@ -1952,7 +2362,7 @@ async def dm_slow_mode_config(
         return
     await message.answer(
         _("dm_sm_topics_prompt"),
-        reply_markup=_build_sm_topics_kb(_raw, chat_id, topics, current),
+        reply_markup=_build_sm_topics_kb(_raw, chat_id, topics, current, overrides),
     )
 
 
@@ -1990,8 +2400,112 @@ async def dm_sm_topic_id(
     topics = await crud.list_topics(session, chat_id)
     await message.answer(
         _("dm_sm_topics_prompt"),
-        reply_markup=_build_sm_topics_kb(_raw, chat_id, topics, selected),
+        reply_markup=_build_sm_topics_kb(
+            _raw,
+            chat_id,
+            topics,
+            selected,
+            await crud.list_slow_mode_topics(session, chat_id),
+        ),
     )
+
+
+@router.message(IsPrivate(), F.text, StateFilter(DmSlowMode.awaiting_topic_params))
+async def dm_sm_topic_params(
+    message: types.Message, state: FSMContext, **data: Any
+) -> None:
+    """Per-topic intervals typed on the topic screen (``dm:smtp:`` step).
+
+    ``6 3`` / ``вкл 6 3`` pin the topic's own hours (regular + verified
+    sellers, clamped to [1, 720]); a single number keeps the chat value for
+    sellers. «вкл» alone turns the rule on here with the chat intervals,
+    «выкл» switches it off in this topic only and «сброс» drops the override
+    so the topic follows the chat again. Bad input keeps the FSM state.
+    """
+    _ = data["_"]
+    _raw = data["_raw"]
+    session: AsyncSession = data["session"]
+
+    state_data = await state.get_data()
+    chat_id = state_data.get("chat_id")
+    thread_id = state_data.get("thread_id")
+    if chat_id is None or thread_id is None:
+        await state.clear()
+        await message.answer(_("dm_menu_title"), reply_markup=build_main_menu(_raw))
+        return
+
+    cfg = await crud.get_slow_mode(session, chat_id)
+    tokens = (message.text or "").strip().lower().split()
+
+    async def redraw(bad: bool = False) -> None:
+        """Redraw the topic screen, or repeat the prompt on a parse failure."""
+        if bad:
+            await message.answer(
+                _("dm_sm_topic_params_bad"),
+                reply_markup=_build_sm_topic_prompt_kb(_raw, chat_id, thread_id),
+            )
+            return
+        await state.clear()
+        override = await crud.get_slow_mode_topic(session, chat_id, thread_id)
+        label = await _sm_topic_label(session, chat_id, thread_id)
+        await message.answer(
+            _sm_topic_screen_text(_, cfg, override, label),
+            reply_markup=_build_sm_topic_kb(_raw, chat_id, thread_id, override),
+        )
+
+    if not tokens:
+        await redraw(bad=True)
+        return
+
+    head, args = tokens[0], tokens[1:]
+    if head in ("сброс", "reset"):
+        await crud.clear_slow_mode_topic(session, chat_id, thread_id)
+        await session.commit()
+        await redraw()
+        return
+    if head in ("выкл", "off"):
+        await crud.set_slow_mode_topic(session, chat_id, thread_id, enabled=False)
+        await session.commit()
+        await redraw()
+        return
+    if head in ("вкл", "on"):
+        if not args:
+            # «вкл» без чисел — включить здесь на интервалах чата.
+            await crud.set_slow_mode_topic(
+                session,
+                chat_id,
+                thread_id,
+                enabled=True,
+                regular_seconds=None,
+                wl_seconds=None,
+            )
+            await session.commit()
+            await redraw()
+            return
+        numbers = args
+    elif head.isdigit():
+        numbers = tokens
+    else:
+        await redraw(bad=True)
+        return
+    if len(numbers) > 2 or any(not number.isdigit() for number in numbers):
+        await redraw(bad=True)
+        return
+
+    def hours(value: str) -> int:
+        return max(1, min(720, int(value))) * 3600
+
+    base_wl = cfg.wl_seconds if cfg is not None else 10800
+    await crud.set_slow_mode_topic(
+        session,
+        chat_id,
+        thread_id,
+        enabled=True,
+        regular_seconds=hours(numbers[0]),
+        wl_seconds=hours(numbers[1]) if len(numbers) > 1 else base_wl,
+    )
+    await session.commit()
+    await redraw()
 
 
 @router.message(IsPrivate(), F.text, StateFilter(DmBroadcast.awaiting_topic_id))

@@ -38,6 +38,12 @@ def patch_crud(monkeypatch):
         monkeypatch.setattr(crud, name, AsyncMock())
     monkeypatch.setattr(crud, "set_slow_mode", AsyncMock())
     monkeypatch.setattr(crud, "list_topics", AsyncMock(return_value=[]))
+    # Per-topic overrides (dict / None) — MagicMock defaults would leak into
+    # the topic keyboard labels and the per-topic screens.
+    monkeypatch.setattr(crud, "list_slow_mode_topics", AsyncMock(return_value={}))
+    monkeypatch.setattr(crud, "get_slow_mode_topic", AsyncMock(return_value=None))
+    monkeypatch.setattr(crud, "set_slow_mode_topic", AsyncMock())
+    monkeypatch.setattr(crud, "clear_slow_mode_topic", AsyncMock(return_value=True))
 
 
 @pytest.fixture

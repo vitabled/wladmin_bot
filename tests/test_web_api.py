@@ -183,6 +183,17 @@ def test_api_chat_detail_200(client, monkeypatch):
             ]
         ),
     )
+    monkeypatch.setattr(
+        crud,
+        "list_slow_mode_topics",
+        AsyncMock(
+            return_value={
+                5: SimpleNamespace(
+                    thread_id=5, enabled=False, regular_seconds=None, wl_seconds=7200
+                )
+            }
+        ),
+    )
     r = client.get("/api/chats/-100")
     assert r.status_code == 200
     data = r.json()
@@ -194,6 +205,14 @@ def test_api_chat_detail_200(client, monkeypatch):
         "regular_seconds": 120,
         "wl_seconds": 60,
         "topic_ids": [3, 6],
+        "topics": [
+            {
+                "thread_id": 5,
+                "enabled": False,
+                "regular_seconds": None,
+                "wl_seconds": 7200,
+            }
+        ],
     }
     assert data["activity"] == {"total": 10, "users": 3}
     assert data["warns"] == 1
@@ -221,12 +240,14 @@ def test_api_chat_detail_slow_mode_defaults(client, monkeypatch):
     monkeypatch.setattr(crud, "count_bans", AsyncMock(return_value=0))
     monkeypatch.setattr(crud, "get_slow_mode", AsyncMock(return_value=None))
     monkeypatch.setattr(crud, "list_topics", AsyncMock(return_value=[]))
+    monkeypatch.setattr(crud, "list_slow_mode_topics", AsyncMock(return_value={}))
     data = client.get("/api/chats/-100").json()
     assert data["slow_mode"] == {
         "enabled": False,
         "regular_seconds": 21600,
         "wl_seconds": 10800,
         "topic_ids": None,
+        "topics": [],
     }
 
 
