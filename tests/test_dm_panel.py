@@ -553,6 +553,7 @@ async def test_panel_slowmode_opens_the_topic_list(base_data, fsm, monkeypatch):
     assert cb.message.edit_text.await_args.args[0] == "dm_sm_topics_empty"
     kb = cb.message.edit_text.await_args.kwargs["reply_markup"]
     assert [[btn.callback_data for btn in row] for row in kb.inline_keyboard] == [
+        [f"dm:smc:{GROUP_CHAT_ID}"],
         [f"dm:smball:{GROUP_CHAT_ID}"],
         [f"dm:smadd:{GROUP_CHAT_ID}"],
         [f"dm:smback:{GROUP_CHAT_ID}"],

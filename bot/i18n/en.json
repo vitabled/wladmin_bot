@@ -62,6 +62,8 @@
   "dm_sm_current_on": "Currently: on, regular {regular}h, WL {wl}h. Topics: {topics}",
   "dm_sm_current_off": "Currently: off. Topics: {topics}",
   "dm_sm_topics_prompt": "Pick the topics the rule applies to (or «All topics»). «⚙️» next to a topic sets its own limit — it works even when the chat-wide rule is off.",
+  "dm_sm_chat_rule_on": "✅ Chat rule: {regular} h, sellers {wl} h — turn off",
+  "dm_sm_chat_rule_off": "⛔ Chat rule is off — turn on",
   "dm_sm_topics_all": "All topics",
   "dm_sm_topics_done": "✅ Done",
   "dm_sm_topics_summary_all": "all topics",

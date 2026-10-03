@@ -530,12 +530,36 @@ def _topic_params_button(
     )
 
 
+def _sm_chat_rule_button(
+    _raw: Callable[..., str], chat_id: int, cfg: Any
+) -> types.InlineKeyboardButton:
+    """The chat-wide rule as ONE button: shows its state, a tap flips it.
+
+    The screen that used to hold this switch is gone (the typed ``вкл|выкл``
+    line stays for messages already sent), so the switch lives here — the
+    list is where the scope and the per-topic limits are handled anyway.
+    """
+    if cfg is not None and cfg.enabled:
+        text = _raw(
+            "dm_sm_chat_rule_on",
+            regular=cfg.regular_seconds // 3600,
+            wl=cfg.wl_seconds // 3600,
+        )
+    else:
+        text = _raw("dm_sm_chat_rule_off")
+    return types.InlineKeyboardButton(
+        text=text, callback_data=f"{_PREFIX}:smc:{chat_id}"
+    )
+
+
 def _build_sm_topics_kb(
     _raw: Callable[..., str],
     chat_id: int,
     topics: list[Any],
     selected: list[int],
     overrides: dict[int, Any] | None = None,
+    *,
+    cfg: Any,
 ) -> types.InlineKeyboardMarkup:
     """Slow-mode topic list: ``[✅/☑️ topic] [⚙️]`` per thread + all/done + nav.
 
@@ -544,13 +568,17 @@ def _build_sm_topics_kb(
     mark is the chat scope (✅ = inside it); ``overrides`` appends «· ⛔» (rule
     off in that topic) or «· ⚙️» (own intervals) to the label.
 
-    Then «Все ветки» (immediate save with ``topic_ids=[]``), «✅ Готово» (save
-    with the picked threads), «🔄 Обновить список» (re-read the DB),
-    «✏️ Добавить ID ветки вручную» and a panel/home nav row.
+    The first row is the chat-wide rule itself (off/on, one tap — ``cfg`` is
+    required so the label can never lie), then «Все ветки» (immediate save
+    with ``topic_ids=[]``), «✅ Готово» (save with the picked threads),
+    «🔄 Обновить список» (re-read the DB), «✏️ Добавить ID ветки вручную» and a
+    panel/home nav row.
     """
     overrides = overrides or {}
     sel = set(selected)
-    rows: list[list[types.InlineKeyboardButton]] = []
+    rows: list[list[types.InlineKeyboardButton]] = [
+        [_sm_chat_rule_button(_raw, chat_id, cfg)]
+    ]
     for topic in _merge_topics(topics, selected):
         mark = "✅" if topic.thread_id in sel else "☑️"
         rows.append(
@@ -800,15 +828,20 @@ def _build_sm_topic_prompt_kb(
 
 
 def _build_sm_topics_empty_kb(
-    _raw: Callable[..., str], chat_id: int
+    _raw: Callable[..., str], chat_id: int, *, cfg: Any
 ) -> types.InlineKeyboardMarkup:
     """Hint screen for a forum with no tracked topics yet.
 
     Telegram gives bots no way to enumerate topics, so instead of silently
     saving «all topics» we explain how topics show up and offer the ways out:
-    «Все ветки» (explicit whole-chat scope), add an id manually, or go back.
+    the chat-wide rule switch, «Все ветки» (explicit whole-chat scope), add an
+    id manually, or go back.
     """
     builder = InlineKeyboardBuilder()
+    builder.button(
+        text=_sm_chat_rule_button(_raw, chat_id, cfg).text,
+        callback_data=f"{_PREFIX}:smc:{chat_id}",
+    )
     builder.button(
         text=_raw("dm_sm_topics_all"),
         callback_data=f"{_PREFIX}:smball:{chat_id}",
@@ -1060,6 +1093,10 @@ async def on_dm_callback(
 
     if action.startswith("smt:"):
         await _dm_sm_topic(callback, action, state, _, _raw, session)
+        return
+
+    if action.startswith("smc:"):
+        await _dm_sm_chat_rule_toggle(callback, action, state, _, _raw, session)
         return
 
     if action.startswith("sm:"):
@@ -1438,7 +1475,12 @@ async def _dm_sm_topic_toggle(
         try:
             await callback.message.edit_reply_markup(
                 reply_markup=_build_sm_topics_kb(
-                    _raw, chat_id, topics, selected, overrides
+                    _raw,
+                    chat_id,
+                    topics,
+                    selected,
+                    overrides,
+                    cfg=await crud.get_slow_mode(session, chat_id),
                 )
             )
         except Exception:
@@ -1505,15 +1547,64 @@ async def _dm_sm_refresh(
     overrides = await crud.list_slow_mode_topics(session, chat_id)
     if not topics and not selected:
         await _edit_or_answer(
-            callback, _("dm_sm_topics_empty"), _build_sm_topics_empty_kb(_raw, chat_id)
+            callback,
+            _("dm_sm_topics_empty"),
+            _build_sm_topics_empty_kb(
+                _raw, chat_id, cfg=await crud.get_slow_mode(session, chat_id)
+            ),
         )
     else:
         await _edit_or_answer(
             callback,
             _("dm_sm_topics_prompt"),
-            _build_sm_topics_kb(_raw, chat_id, topics, selected, overrides),
+            _build_sm_topics_kb(
+                _raw,
+                chat_id,
+                topics,
+                selected,
+                overrides,
+                cfg=await crud.get_slow_mode(session, chat_id),
+            ),
         )
     await callback.answer()
+
+
+async def _dm_sm_chat_rule_toggle(
+    callback: types.CallbackQuery,
+    action: str,
+    state: FSMContext,
+    _: Callable[..., str],
+    _raw: Callable[..., str],
+    session: AsyncSession,
+) -> None:
+    """The chat-wide rule button (``dm:smc:<chat>``): flip it, keep the values.
+
+    Turning it on never invents a scope: the stored interval and topic list
+    are reused (6 h / 3 h the first time), so one tap gives the whole chat a
+    rule and the next one takes it away without losing anything.
+    """
+    parts = action.split(":")
+    if len(parts) != 2:
+        await callback.answer()
+        return
+    try:
+        chat_id = int(parts[1])
+    except ValueError:
+        await callback.answer()
+        return
+    cfg = await crud.get_slow_mode(session, chat_id)
+    enabled = cfg is None or not cfg.enabled
+    await crud.set_slow_mode(
+        session,
+        chat_id,
+        enabled=enabled,
+        regular_seconds=cfg.regular_seconds if cfg is not None else 21600,
+        wl_seconds=cfg.wl_seconds if cfg is not None else 10800,
+        topic_ids=list(cfg.topic_ids) if cfg is not None and cfg.topic_ids else [],
+    )
+    await session.commit()
+    logger.info("dm.sm_chat_rule_toggled", extra={"chat_id": chat_id, "on": enabled})
+    await _dm_sm_topics_list(callback, f"smtl:{chat_id}", state, _, _raw, session)
 
 
 async def _dm_sm_add_id(
@@ -1668,13 +1759,15 @@ async def _dm_sm_topics_list(
     )
     if not topics and not selected:
         await _edit_or_answer(
-            callback, _("dm_sm_topics_empty"), _build_sm_topics_empty_kb(_raw, chat_id)
+            callback,
+            _("dm_sm_topics_empty"),
+            _build_sm_topics_empty_kb(_raw, chat_id, cfg=cfg),
         )
     else:
         await _edit_or_answer(
             callback,
             _("dm_sm_topics_prompt"),
-            _build_sm_topics_kb(_raw, chat_id, topics, selected, overrides),
+            _build_sm_topics_kb(_raw, chat_id, topics, selected, overrides, cfg=cfg),
         )
     await callback.answer()
 
@@ -2604,12 +2697,23 @@ async def dm_slow_mode_config(
     if not topics:
         await message.answer(
             _("dm_sm_topics_empty"),
-            reply_markup=_build_sm_topics_empty_kb(_raw, chat_id),
+            reply_markup=_build_sm_topics_empty_kb(
+                _raw,
+                chat_id,
+                cfg=await crud.get_slow_mode(session, chat_id),
+            ),
         )
         return
     await message.answer(
         _("dm_sm_topics_prompt"),
-        reply_markup=_build_sm_topics_kb(_raw, chat_id, topics, current, overrides),
+        reply_markup=_build_sm_topics_kb(
+            _raw,
+            chat_id,
+            topics,
+            current,
+            overrides,
+            cfg=await crud.get_slow_mode(session, chat_id),
+        ),
     )
 
 
@@ -2653,6 +2757,7 @@ async def dm_sm_topic_id(
             topics,
             selected,
             await crud.list_slow_mode_topics(session, chat_id),
+            cfg=await crud.get_slow_mode(session, chat_id),
         ),
     )
 

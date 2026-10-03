@@ -397,6 +397,7 @@ async def test_topics_list_has_params_button_per_topic(base_data, fsm, monkeypat
 
     assert cb.message.edit_text.await_args.args[0] == "dm_sm_topics_prompt"
     assert _kb_rows(cb) == [
+        [f"dm:smc:{GROUP_CHAT_ID}"],  # the chat-wide rule itself, one tap
         [f"dm:smb:{GROUP_CHAT_ID}:3", f"dm:smt:{GROUP_CHAT_ID}:3"],
         [f"dm:smb:{GROUP_CHAT_ID}:6", f"dm:smt:{GROUP_CHAT_ID}:6"],
         [f"dm:smball:{GROUP_CHAT_ID}"],
@@ -406,12 +407,13 @@ async def test_topics_list_has_params_button_per_topic(base_data, fsm, monkeypat
         [f"dm:g:{GROUP_CHAT_ID}", "dm:menu"],
     ]
     kb = cb.message.edit_text.await_args.kwargs["reply_markup"]
-    assert kb.inline_keyboard[0][0].text == "✅ Новости · 10 сообщ."
-    assert kb.inline_keyboard[0][1].text == "dm_sm_topic_params"
-    assert kb.inline_keyboard[0][1].icon_custom_emoji_id == "5877260593903177342"
+    assert kb.inline_keyboard[0][0].text == "dm_sm_chat_rule_on"  # 6 ч / 3 ч
+    assert kb.inline_keyboard[1][0].text == "✅ Новости · 10 сообщ."
+    assert kb.inline_keyboard[1][1].text == "dm_sm_topic_params"
+    assert kb.inline_keyboard[1][1].icon_custom_emoji_id == "5877260593903177342"
     # Overrides show up on the row (the test translator echoes the key):
     # «· dm_sm_topic_status_off» = the rule is off in that topic.
-    assert kb.inline_keyboard[1][0].text == "☑️ #6 · 4 сообщ. · dm_sm_topic_status_off"
+    assert kb.inline_keyboard[2][0].text == "☑️ #6 · 4 сообщ. · dm_sm_topic_status_off"
     # The list behaves like the post-«вкл» step, so the FSM is seeded from the
     # chat-level config («Все ветки» / «Готово» keep working).
     assert await fsm.get_state() == dm_menu.DmSlowMode.awaiting_topics
@@ -443,7 +445,7 @@ async def test_topics_list_own_params_mark(base_data, fsm, monkeypatch):
 
     kb = cb.message.edit_text.await_args.kwargs["reply_markup"]
     assert (
-        kb.inline_keyboard[0][0].text
+        kb.inline_keyboard[1][0].text
         == "☑️ Новости · 2 сообщ. · dm_sm_topic_status_own"
     )
 
@@ -457,6 +459,7 @@ async def test_topics_list_empty_shows_hint_screen(base_data, fsm, monkeypatch):
 
     assert cb.message.edit_text.await_args.args[0] == "dm_sm_topics_empty"
     assert _all_callbacks(cb) == [
+        f"dm:smc:{GROUP_CHAT_ID}",  # the chat-wide rule is reachable here too
         f"dm:smball:{GROUP_CHAT_ID}",
         f"dm:smadd:{GROUP_CHAT_ID}",
         f"dm:smback:{GROUP_CHAT_ID}",

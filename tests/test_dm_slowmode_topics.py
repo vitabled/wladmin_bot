@@ -114,6 +114,7 @@ async def test_empty_topics_shows_hint_and_does_not_save(base_data, fsm, monkeyp
     assert msg.answer.await_args.args[0] == "dm_sm_topics_empty"
     kb = msg.answer.await_args.kwargs["reply_markup"]
     assert _callbacks(kb) == [
+        f"dm:smc:{GROUP_CHAT_ID}",
         f"dm:smball:{GROUP_CHAT_ID}",
         f"dm:smadd:{GROUP_CHAT_ID}",
         f"dm:smback:{GROUP_CHAT_ID}",
@@ -176,12 +177,14 @@ async def test_topics_show_names_with_id_fallback(base_data, fsm, monkeypatch):
 
     assert msg.answer.await_args.args[0] == "dm_sm_topics_prompt"
     kb = msg.answer.await_args.kwargs["reply_markup"]
-    assert kb.inline_keyboard[0][0].text == "☑️ Новости · 10 сообщ."
-    assert kb.inline_keyboard[0][0].callback_data == f"dm:smb:{GROUP_CHAT_ID}:3"
-    assert kb.inline_keyboard[1][0].text == "☑️ #6 · 4 сообщ."
-    assert kb.inline_keyboard[1][0].callback_data == f"dm:smb:{GROUP_CHAT_ID}:6"
+    # Row 0 is the chat-wide rule itself; the topics start on row 1.
+    assert kb.inline_keyboard[0][0].callback_data == f"dm:smc:{GROUP_CHAT_ID}"
+    assert kb.inline_keyboard[1][0].text == "☑️ Новости · 10 сообщ."
+    assert kb.inline_keyboard[1][0].callback_data == f"dm:smb:{GROUP_CHAT_ID}:3"
+    assert kb.inline_keyboard[2][0].text == "☑️ #6 · 4 сообщ."
+    assert kb.inline_keyboard[2][0].callback_data == f"dm:smb:{GROUP_CHAT_ID}:6"
     # «Все ветки», «Готово», «Обновить», «Добавить ID», then the nav row.
-    assert _callbacks(kb)[2:6] == [
+    assert _callbacks(kb)[3:7] == [
         f"dm:smball:{GROUP_CHAT_ID}",
         f"dm:smbdone:{GROUP_CHAT_ID}",
         f"dm:smrefresh:{GROUP_CHAT_ID}",
@@ -208,8 +211,8 @@ async def test_refresh_rereads_topics(base_data, fsm, monkeypatch):
     list_mock.assert_awaited_once_with(base_data["session"], GROUP_CHAT_ID)
     assert cb.message.edit_text.await_args.args[0] == "dm_sm_topics_prompt"
     kb = cb.message.edit_text.await_args.kwargs["reply_markup"]
-    assert kb.inline_keyboard[0][0].text.startswith("✅")
-    assert "Свежая ветка" in kb.inline_keyboard[0][0].text
+    assert kb.inline_keyboard[1][0].text.startswith("✅")
+    assert "Свежая ветка" in kb.inline_keyboard[1][0].text
     cb.answer.assert_awaited_once()
 
 
@@ -224,6 +227,7 @@ async def test_refresh_still_empty_keeps_hint_screen(base_data, fsm, monkeypatch
     assert cb.message.edit_text.await_args.args[0] == "dm_sm_topics_empty"
     kb = cb.message.edit_text.await_args.kwargs["reply_markup"]
     assert _callbacks(kb) == [
+        f"dm:smc:{GROUP_CHAT_ID}",
         f"dm:smball:{GROUP_CHAT_ID}",
         f"dm:smadd:{GROUP_CHAT_ID}",
         f"dm:smback:{GROUP_CHAT_ID}",
@@ -255,8 +259,8 @@ async def test_manual_id_is_selected_and_visible(base_data, fsm, monkeypatch):
     assert await fsm.get_state() == dm_menu.DmSlowMode.awaiting_topics
     assert (await fsm.get_data())["selected_topics"] == [777]
     kb = msg.answer.await_args.kwargs["reply_markup"]
-    assert kb.inline_keyboard[0][0].text.startswith("✅")
-    assert kb.inline_keyboard[0][0].callback_data == f"dm:smb:{GROUP_CHAT_ID}:777"
+    assert kb.inline_keyboard[1][0].text.startswith("✅")
+    assert kb.inline_keyboard[1][0].callback_data == f"dm:smb:{GROUP_CHAT_ID}:777"
 
 
 async def test_manual_id_bad_input_keeps_state(base_data, fsm):
@@ -291,6 +295,78 @@ async def test_manual_id_done_saves_selection(base_data, fsm, monkeypatch):
         wl_seconds=10800,
         topic_ids=[5],
     )
+
+
+# --------------------------------------------------------------------------- #
+# The chat-wide rule button (dm:smc:) — one tap on, one tap off
+# --------------------------------------------------------------------------- #
+async def test_chat_rule_button_turns_the_rule_on(base_data, fsm, monkeypatch):
+    await fsm.set_state(dm_menu.DmSlowMode.awaiting_topics)
+    await fsm.update_data(chat_id=GROUP_CHAT_ID, selected_topics=[], pending_sm={})
+    monkeypatch.setattr(
+        crud, "list_topics", AsyncMock(return_value=[_topic(3, count=2)])
+    )
+    monkeypatch.setattr(crud, "list_slow_mode_topics", AsyncMock(return_value={}))
+    monkeypatch.setattr(crud, "get_slow_mode", AsyncMock(return_value=None))
+    set_mock = AsyncMock()
+    monkeypatch.setattr(crud, "set_slow_mode", set_mock)
+
+    cb = _cb(f"dm:smc:{GROUP_CHAT_ID}")
+    await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
+
+    set_mock.assert_awaited_once_with(
+        base_data["session"],
+        GROUP_CHAT_ID,
+        enabled=True,
+        regular_seconds=21600,
+        wl_seconds=10800,
+        topic_ids=[],
+    )
+    cb.answer.assert_awaited_once()
+    # The list is redrawn, so the button label reflects the new state.
+    assert cb.message.edit_text.await_args.args[0] == "dm_sm_topics_prompt"
+
+
+async def test_chat_rule_button_turns_the_rule_off_keeping_values(
+    base_data, fsm, monkeypatch
+):
+    await fsm.set_state(dm_menu.DmSlowMode.awaiting_topics)
+    await fsm.update_data(chat_id=GROUP_CHAT_ID, selected_topics=[3], pending_sm={})
+    monkeypatch.setattr(crud, "list_topics", AsyncMock(return_value=[]))
+    monkeypatch.setattr(crud, "list_slow_mode_topics", AsyncMock(return_value={}))
+    monkeypatch.setattr(
+        crud,
+        "get_slow_mode",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                enabled=True,
+                regular_seconds=43200,
+                wl_seconds=3600,
+                topic_ids=[3],
+            )
+        ),
+    )
+    set_mock = AsyncMock()
+    monkeypatch.setattr(crud, "set_slow_mode", set_mock)
+
+    cb = _cb(f"dm:smc:{GROUP_CHAT_ID}")
+    await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
+
+    set_mock.assert_awaited_once_with(
+        base_data["session"],
+        GROUP_CHAT_ID,
+        enabled=False,
+        regular_seconds=43200,
+        wl_seconds=3600,
+        topic_ids=[3],
+    )
+
+
+async def test_chat_rule_button_without_a_chat_id_just_answers(base_data, fsm):
+    cb = _cb("dm:smc:не-число")
+    await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
+
+    cb.answer.assert_awaited_once()
 
 
 async def test_smback_clears_state_and_shows_panel(base_data, fsm, monkeypatch):

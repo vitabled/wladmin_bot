@@ -208,6 +208,7 @@ async def test_slow_mode_callback_opens_the_topic_list(base_data, fsm, monkeypat
     assert cb.message.edit_text.await_args.args[0] == "dm_sm_topics_empty"
     kb = cb.message.edit_text.await_args.kwargs["reply_markup"]
     assert [[btn.callback_data for btn in row] for row in kb.inline_keyboard] == [
+        [f"dm:smc:{GROUP_CHAT_ID}"],
         [f"dm:smball:{GROUP_CHAT_ID}"],
         [f"dm:smadd:{GROUP_CHAT_ID}"],
         [f"dm:smback:{GROUP_CHAT_ID}"],
@@ -234,6 +235,7 @@ async def test_slow_mode_on_empty_topics_shows_hint_not_saved(
     assert msg.answer.await_args.args[0] == "dm_sm_topics_empty"
     kb = msg.answer.await_args.kwargs["reply_markup"]
     assert [row[0].callback_data for row in kb.inline_keyboard] == [
+        f"dm:smc:{GROUP_CHAT_ID}",
         f"dm:smball:{GROUP_CHAT_ID}",
         f"dm:smadd:{GROUP_CHAT_ID}",
         f"dm:smback:{GROUP_CHAT_ID}",
@@ -336,14 +338,15 @@ async def test_slow_mode_on_with_topics_goes_to_awaiting_topics(
     assert msg.answer.await_args.args[0] == "dm_sm_topics_prompt"
     kb = msg.answer.await_args.kwargs["reply_markup"]
     rows = kb.inline_keyboard
-    assert rows[0][0].callback_data == f"dm:smb:{GROUP_CHAT_ID}:3"
-    assert rows[0][0].text == f"☑️ #3 · {3 * 10} сообщ."
-    assert rows[3][0].callback_data == f"dm:smball:{GROUP_CHAT_ID}"
-    assert rows[4][0].callback_data == f"dm:smbdone:{GROUP_CHAT_ID}"
-    assert rows[5][0].callback_data == f"dm:smrefresh:{GROUP_CHAT_ID}"
-    assert rows[6][0].callback_data == f"dm:smadd:{GROUP_CHAT_ID}"
+    assert rows[0][0].callback_data == f"dm:smc:{GROUP_CHAT_ID}"  # chat-wide rule
+    assert rows[1][0].callback_data == f"dm:smb:{GROUP_CHAT_ID}:3"
+    assert rows[1][0].text == f"☑️ #3 · {3 * 10} сообщ."
+    assert rows[4][0].callback_data == f"dm:smball:{GROUP_CHAT_ID}"
+    assert rows[5][0].callback_data == f"dm:smbdone:{GROUP_CHAT_ID}"
+    assert rows[6][0].callback_data == f"dm:smrefresh:{GROUP_CHAT_ID}"
+    assert rows[7][0].callback_data == f"dm:smadd:{GROUP_CHAT_ID}"
     # nav row: panel back + home
-    assert [btn.callback_data for btn in rows[7]] == [
+    assert [btn.callback_data for btn in rows[8]] == [
         f"dm:g:{GROUP_CHAT_ID}",
         "dm:menu",
     ]
@@ -369,8 +372,8 @@ async def test_slow_mode_on_prefills_selection_from_config(base_data, fsm, monke
     state_data = await fsm.get_data()
     assert state_data["selected_topics"] == [3]  # prefilled from the row
     kb = msg.answer.await_args.kwargs["reply_markup"]
-    assert kb.inline_keyboard[0][0].text.startswith("✅")  # #3 pre-checked
-    assert kb.inline_keyboard[1][0].text.startswith("☑️")  # #6 unchecked
+    assert kb.inline_keyboard[1][0].text.startswith("✅")  # #3 pre-checked
+    assert kb.inline_keyboard[2][0].text.startswith("☑️")  # #6 unchecked
 
 
 async def test_slow_mode_topic_toggle_updates_selection(base_data, fsm, monkeypatch):
@@ -387,7 +390,7 @@ async def test_slow_mode_topic_toggle_updates_selection(base_data, fsm, monkeypa
     assert (await fsm.get_data())["selected_topics"] == [3]
     assert await fsm.get_state() == dm_menu.DmSlowMode.awaiting_topics  # still picking
     kb = cb.message.edit_reply_markup.await_args.kwargs["reply_markup"]
-    assert kb.inline_keyboard[0][0].text.startswith("✅")
+    assert kb.inline_keyboard[1][0].text.startswith("✅")
     cb.answer.assert_awaited_once()
 
 
