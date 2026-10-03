@@ -65,7 +65,7 @@
   "dm_sm_topics_all": "Все ветки",
   "dm_sm_topics_done": "✅ Готово",
   "dm_sm_topics_summary_all": "все ветки",
-  "dm_sm_topics_summary_list": "#{ids}",
+  "dm_sm_topics_summary_list": "{ids}",
   "dm_sm_topics_empty": "🧩 Ветки появляются здесь, когда в них есть сообщения: Telegram не отдаёт боту список тем. Напишите сообщение в нужной ветке, либо добавьте ID вручную, либо выберите «Все ветки».",
   "dm_sm_topics_refresh": "🔄 Обновить список",
   "dm_sm_topics_add": "✏️ Добавить ID ветки вручную",

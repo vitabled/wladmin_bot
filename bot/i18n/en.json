@@ -65,7 +65,7 @@
   "dm_sm_topics_all": "All topics",
   "dm_sm_topics_done": "✅ Done",
   "dm_sm_topics_summary_all": "all topics",
-  "dm_sm_topics_summary_list": "#{ids}",
+  "dm_sm_topics_summary_list": "{ids}",
   "dm_sm_topics_empty": "🧩 Topics appear here once they have messages: Telegram does not give bots the topic list. Send a message in the topic, or add its ID manually, or pick «All topics».",
   "dm_sm_topics_refresh": "🔄 Refresh list",
   "dm_sm_topics_add": "✏️ Add topic ID manually",

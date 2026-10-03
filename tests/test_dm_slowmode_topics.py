@@ -307,3 +307,17 @@ async def test_smback_clears_state_and_shows_panel(base_data, fsm, monkeypatch):
 
     assert await fsm.get_state() is None
     assert cb.message.edit_text.await_args.args[0] == "dm_panel_title"
+
+
+@pytest.mark.parametrize("lang", ["ru", "en"])
+def test_scope_summary_single_hash(lang):
+    """«Ветки: #3, #6» — ids already carry '#', the template must not add one."""
+    from bot.i18n.loader import get_i18n
+
+    def _(key: str, **kw):
+        return get_i18n().get(key, lang, **kw)
+
+    assert dm_menu._sm_topics_summary(_, [3, 6]) == "#3, #6"
+    assert dm_menu._sm_topics_summary(_, []) == get_i18n().get(
+        "dm_sm_topics_summary_all", lang
+    )
