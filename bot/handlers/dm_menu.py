@@ -1924,14 +1924,21 @@ async def _sm_set_topic_interval(
     thread_id: int,
     seconds: int | None,
 ) -> None:
-    """Write the topic's interval for EVERYONE (``None`` = follow the chat).
+    """Write the topic's limit for EVERYONE (``None`` = follow the chat).
 
     ``regular_seconds`` is the single value the rule uses for every role in the
     topic; a legacy ``wl_seconds`` is cleared on every write so no stale split
-    survives in the database. The per-topic on/off switch is left untouched.
+    survives in the database. Choosing a limit also turns the rule on in this
+    topic — otherwise a value set while the topic was off would look inert
+    («⛔ Выключить здесь» in the grid is the way to keep it off).
     """
     await crud.set_slow_mode_topic(
-        session, chat_id, thread_id, regular_seconds=seconds, wl_seconds=None
+        session,
+        chat_id,
+        thread_id,
+        enabled=True,
+        regular_seconds=seconds,
+        wl_seconds=None,
     )
 
 
@@ -2856,7 +2863,6 @@ async def dm_sm_topic_params(
         return
 
     await _sm_set_topic_interval(session, chat_id, thread_id, seconds)
-    await crud.set_slow_mode_topic(session, chat_id, thread_id, enabled=True)
     await session.commit()
     await redraw()
 

@@ -673,7 +673,12 @@ async def test_topic_pick_step_from_unlimited_pins_one_hour(
     await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
 
     set_mock.assert_awaited_once_with(
-        base_data["session"], GROUP_CHAT_ID, 3, regular_seconds=3600, wl_seconds=None
+        base_data["session"],
+        GROUP_CHAT_ID,
+        3,
+        enabled=True,
+        regular_seconds=3600,
+        wl_seconds=None,
     )
 
 
@@ -687,7 +692,12 @@ async def test_topic_pick_set_pins_value_and_redraws(base_data, fsm, monkeypatch
     await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
 
     set_mock.assert_awaited_once_with(
-        base_data["session"], GROUP_CHAT_ID, 3, regular_seconds=43200, wl_seconds=None
+        base_data["session"],
+        GROUP_CHAT_ID,
+        3,
+        enabled=True,
+        regular_seconds=43200,
+        wl_seconds=None,
     )
     base_data["session"].commit.assert_awaited_once()
     assert cb.message.edit_text.await_args.args[0].startswith("dm_sm_topic_pick_all")
@@ -703,7 +713,7 @@ async def test_topic_pick_zero_means_unlimited(base_data, fsm, monkeypatch):
     await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
 
     set_mock.assert_awaited_once_with(
-        base_data["session"], GROUP_CHAT_ID, 3, regular_seconds=0, wl_seconds=None
+        base_data["session"], GROUP_CHAT_ID, 3, enabled=True, regular_seconds=0, wl_seconds=None
     )
 
 
@@ -740,7 +750,12 @@ async def test_topic_pick_step_moves_the_single_value(
     await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
 
     set_mock.assert_awaited_once_with(
-        base_data["session"], GROUP_CHAT_ID, 3, regular_seconds=expected, wl_seconds=None
+        base_data["session"],
+        GROUP_CHAT_ID,
+        3,
+        enabled=True,
+        regular_seconds=expected,
+        wl_seconds=None,
     )
 
 
@@ -758,7 +773,12 @@ async def test_topic_pick_step_clamps_at_one_hour(base_data, fsm, monkeypatch):
     await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
 
     set_mock.assert_awaited_once_with(
-        base_data["session"], GROUP_CHAT_ID, 3, regular_seconds=3600, wl_seconds=None
+        base_data["session"],
+        GROUP_CHAT_ID,
+        3,
+        enabled=True,
+        regular_seconds=3600,
+        wl_seconds=None,
     )
 
 
@@ -914,7 +934,12 @@ async def test_topic_callbacks_accept_legacy_role_suffix(base_data, fsm, monkeyp
     cb = _cb(f"dm:smtvs:{GROUP_CHAT_ID}:3:w:6")  # legacy preset press
     await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
     set_mock.assert_awaited_once_with(
-        base_data["session"], GROUP_CHAT_ID, 3, regular_seconds=21600, wl_seconds=None
+        base_data["session"],
+        GROUP_CHAT_ID,
+        3,
+        enabled=True,
+        regular_seconds=21600,
+        wl_seconds=None,
     )
 
     set_mock.reset_mock()
@@ -963,8 +988,7 @@ async def test_params_one_number_sets_the_limit(base_data, fsm, monkeypatch):
     await dm_menu.dm_sm_topic_params(msg, state=fsm, **base_data)
 
     assert [call.kwargs for call in set_mock.await_args_list] == [
-        {"regular_seconds": 21600, "wl_seconds": None},
-        {"enabled": True},
+        {"enabled": True, "regular_seconds": 21600, "wl_seconds": None},
     ]
     base_data["session"].commit.assert_awaited_once_with()
     assert await fsm.get_state() is None
@@ -982,7 +1006,7 @@ async def test_params_accepts_prefix_case_and_unit(base_data, fsm, monkeypatch, 
     await dm_menu.dm_sm_topic_params(msg, state=fsm, **base_data)
 
     _args, kwargs = set_mock.await_args_list[0]
-    assert kwargs == {"regular_seconds": 21600, "wl_seconds": None}
+    assert kwargs == {"enabled": True, "regular_seconds": 21600, "wl_seconds": None}
 
 
 @pytest.mark.parametrize("text", ["0", "без лимита", "∞"])
@@ -998,7 +1022,7 @@ async def test_params_unlimited_words_mean_no_limit(base_data, fsm, monkeypatch,
     await dm_menu.dm_sm_topic_params(msg, state=fsm, **base_data)
 
     _args, kwargs = set_mock.await_args_list[0]
-    assert kwargs == {"regular_seconds": 0, "wl_seconds": None}
+    assert kwargs == {"enabled": True, "regular_seconds": 0, "wl_seconds": None}
 
 
 async def test_params_clamps_to_720_hours(base_data, fsm, monkeypatch):
