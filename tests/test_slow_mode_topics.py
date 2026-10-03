@@ -757,8 +757,8 @@ async def test_topic_pick_step_clamps_at_one_hour(base_data, fsm, monkeypatch):
     )
 
 
-async def test_topic_pick_inherit_clears_own_interval(base_data, fsm, monkeypatch):
-    """«↩️ Как в чате» in the grid stores NULL so the chat's rules apply again."""
+async def test_topic_pick_inherit_drops_the_row(base_data, fsm, monkeypatch):
+    """«↩️ Как в чате» removes the row — nothing left to mark as «own params»."""
     monkeypatch.setattr(crud, "get_slow_mode", AsyncMock(return_value=_config()))
     monkeypatch.setattr(
         crud,
@@ -767,6 +767,30 @@ async def test_topic_pick_inherit_clears_own_interval(base_data, fsm, monkeypatc
     )
     set_mock = AsyncMock()
     monkeypatch.setattr(crud, "set_slow_mode_topic", set_mock)
+    clear_mock = AsyncMock(return_value=True)
+    monkeypatch.setattr(crud, "clear_slow_mode_topic", clear_mock)
+
+    cb = _cb(f"dm:smtvi:{GROUP_CHAT_ID}:3")
+    await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
+
+    clear_mock.assert_awaited_once_with(base_data["session"], GROUP_CHAT_ID, 3)
+    set_mock.assert_not_awaited()
+    base_data["session"].commit.assert_awaited_once()
+    assert cb.message.edit_text.await_args.args[0].startswith("dm_sm_topic_pick_all")
+
+
+async def test_topic_pick_inherit_keeps_off_here_row(base_data, fsm, monkeypatch):
+    """A topic switched off here keeps its row: «как в чате» only clears limits."""
+    monkeypatch.setattr(crud, "get_slow_mode", AsyncMock(return_value=_config()))
+    monkeypatch.setattr(
+        crud,
+        "get_slow_mode_topic",
+        AsyncMock(return_value=_override(enabled=False, regular=7200)),
+    )
+    set_mock = AsyncMock()
+    monkeypatch.setattr(crud, "set_slow_mode_topic", set_mock)
+    clear_mock = AsyncMock(return_value=True)
+    monkeypatch.setattr(crud, "clear_slow_mode_topic", clear_mock)
 
     cb = _cb(f"dm:smtvi:{GROUP_CHAT_ID}:3")
     await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
@@ -774,11 +798,11 @@ async def test_topic_pick_inherit_clears_own_interval(base_data, fsm, monkeypatc
     set_mock.assert_awaited_once_with(
         base_data["session"], GROUP_CHAT_ID, 3, regular_seconds=None, wl_seconds=None
     )
-    assert cb.message.edit_text.await_args.args[0].startswith("dm_sm_topic_pick_all")
+    clear_mock.assert_not_awaited()
 
 
 async def test_topic_pick_hides_inherit_without_own_value(base_data, fsm, monkeypatch):
-    """While the topic has no value of its own there is nothing to reset."""
+    """While the topic has no limit of its own there is nothing to reset."""
     monkeypatch.setattr(crud, "get_slow_mode", AsyncMock(return_value=_config()))
 
     cb = _cb(f"dm:smtv:{GROUP_CHAT_ID}:3")
@@ -821,6 +845,30 @@ async def test_topic_pick_shows_inherit_with_own_value(base_data, fsm, monkeypat
     await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
 
     assert f"dm:smtvi:{GROUP_CHAT_ID}:3" in _all_callbacks(cb)
+
+
+async def test_topic_callbacks_accept_legacy_role_suffix(base_data, fsm, monkeypatch):
+    """Old messages carry ``:r``/``:w`` in the data — those presses still work."""
+    monkeypatch.setattr(crud, "get_slow_mode", AsyncMock(return_value=_config()))
+    set_mock = AsyncMock()
+    monkeypatch.setattr(crud, "set_slow_mode_topic", set_mock)
+    clear_mock = AsyncMock(return_value=True)
+    monkeypatch.setattr(crud, "clear_slow_mode_topic", clear_mock)
+
+    cb = _cb(f"dm:smtvs:{GROUP_CHAT_ID}:3:w:6")  # legacy preset press
+    await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
+    set_mock.assert_awaited_once_with(
+        base_data["session"], GROUP_CHAT_ID, 3, regular_seconds=21600, wl_seconds=None
+    )
+
+    set_mock.reset_mock()
+    cb = _cb(f"dm:smtv:{GROUP_CHAT_ID}:3:r")  # opens the single-value grid
+    await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
+    assert cb.message.edit_text.await_args.args[0].startswith("dm_sm_topic_pick_all")
+
+    cb = _cb(f"dm:smtvi:{GROUP_CHAT_ID}:3:w")  # «как в чате» drops the row
+    await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
+    clear_mock.assert_awaited_once_with(base_data["session"], GROUP_CHAT_ID, 3)
 
 
 async def test_topic_callbacks_reject_malformed_data(base_data, fsm):

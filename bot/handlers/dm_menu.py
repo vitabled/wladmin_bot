@@ -514,6 +514,8 @@ def _sm_topic_status(_raw: Callable[..., str], override: Any) -> str:
         return ""
     if not override.enabled:
         return f" · {_raw('dm_sm_topic_status_off')}"
+    if override.regular_seconds is None:
+        return ""  # nothing set of its own: the topic follows the chat
     return f" · {_raw('dm_sm_topic_status_own')}"
 
 
@@ -1891,6 +1893,25 @@ async def _sm_set_topic_interval(
     )
 
 
+async def _sm_clear_topic_interval(
+    session: AsyncSession, chat_id: int, thread_id: int
+) -> None:
+    """«↩️ Как в чате»: drop the topic's own limit.
+
+    A row that only carried the limit is removed outright, so the topic stops
+    being marked as «own params» in the list and the chat's topic scope applies
+    to it again (a leftover row would enlarge the scope). A row that switches
+    the rule off here is kept — «⛔ выключено здесь» is a separate setting.
+    """
+    override = await crud.get_slow_mode_topic(session, chat_id, thread_id)
+    if override is not None and not override.enabled:
+        await crud.set_slow_mode_topic(
+            session, chat_id, thread_id, regular_seconds=None, wl_seconds=None
+        )
+        return
+    await crud.clear_slow_mode_topic(session, chat_id, thread_id)
+
+
 async def _sm_show_pick(
     callback: types.CallbackQuery,
     chat_id: int,
@@ -2003,7 +2024,7 @@ async def _dm_sm_topic_pick_inherit(
         await callback.answer()
         return
     chat_id, thread_id = ids
-    await _sm_set_topic_interval(session, chat_id, thread_id, None)
+    await _sm_clear_topic_interval(session, chat_id, thread_id)
     await session.commit()
     await _sm_show_pick(callback, chat_id, thread_id, _, _raw, session)
     await callback.answer()
