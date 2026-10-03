@@ -310,7 +310,13 @@ async def test_wl_seller_uses_wl_interval(monkeypatch, base_data):
     # Same tiny regular interval, but a plain user (no WL entry): blocked.
     _patch_crud(monkeypatch, config, scam_entry=None)
     redis.set.reset_mock()
-    redis.get.return_value = str(int(time.time()))  # 0s ago < 1s interval
+    # Freeze the clock: on a real second boundary the 1s window could lapse
+    # between writing the stamp and reading it, making this assertion flaky.
+    frozen = int(time.time())
+    monkeypatch.setattr(
+        "bot.services.slow_mode.time", SimpleNamespace(time=lambda: float(frozen))
+    )
+    redis.get.return_value = str(frozen)  # 0s ago < 1s interval
     assert await check_and_record(make_bot(), msg, _data(base_data)) is False
     msg.reply.assert_awaited()
     redis.set.assert_not_called()

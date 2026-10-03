@@ -425,7 +425,8 @@ async def test_topic_screen_inherits_chat(base_data, fsm, monkeypatch):
     }
     assert _kb_rows(cb) == [
         [f"dm:smtx:{GROUP_CHAT_ID}:3"],
-        [f"dm:smtp:{GROUP_CHAT_ID}:3"],
+        [f"dm:smtv:{GROUP_CHAT_ID}:3:r"],
+        [f"dm:smtv:{GROUP_CHAT_ID}:3:w"],
         [f"dm:smtl:{GROUP_CHAT_ID}", "dm:menu"],
     ]
     # No override yet → no «Как в чате» row.
@@ -536,11 +537,261 @@ async def test_topic_set_asks_for_intervals(base_data, fsm, monkeypatch):
     ]
 
 
+# --- per-topic intervals by buttons (no typing) ----------------------------- #
+
+
+def _btn_texts(cb) -> list[str]:
+    kb = cb.message.edit_text.await_args.kwargs["reply_markup"]
+    return [btn.text for row in kb.inline_keyboard for btn in row]
+
+
+async def test_topic_screen_interval_buttons_carry_effective_hours(
+    base_data, fsm, monkeypatch
+):
+    """Buttons on the topic screen name the effective hours (own beats chat)."""
+    calls: list[tuple[str, dict]] = []
+
+    def raw(key, **kw):
+        calls.append((key, kw))
+        return key
+
+    base_data["_raw"] = raw
+    monkeypatch.setattr(
+        crud, "get_slow_mode", AsyncMock(return_value=_config(regular=21600, wl=10800))
+    )
+    monkeypatch.setattr(
+        crud,
+        "get_slow_mode_topic",
+        AsyncMock(return_value=_override(enabled=True, regular=7200)),
+    )
+
+    cb = _cb(f"dm:smt:{GROUP_CHAT_ID}:3")
+    await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
+
+    kb = cb.message.edit_text.await_args.kwargs["reply_markup"]
+    assert kb.inline_keyboard[1][0].callback_data == f"dm:smtv:{GROUP_CHAT_ID}:3:r"
+    assert kb.inline_keyboard[2][0].callback_data == f"dm:smtv:{GROUP_CHAT_ID}:3:w"
+    assert ("dm_sm_hours", {"hours": 2}) in calls  # own value
+    assert ("dm_sm_hours", {"hours": 3}) in calls  # inherited from the chat
+
+
+async def test_topic_pick_opens_grid_and_marks_current(base_data, fsm, monkeypatch):
+    """«🕒» opens the hour grid; the matching preset carries «✅»."""
+    calls = _capturing_translator(base_data)
+    monkeypatch.setattr(
+        crud, "get_slow_mode", AsyncMock(return_value=_config(regular=21600, wl=10800))
+    )
+    monkeypatch.setattr(
+        crud, "list_topics", AsyncMock(return_value=[_topic(3, title="Новости")])
+    )
+
+    cb = _cb(f"dm:smtv:{GROUP_CHAT_ID}:3:r")
+    await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
+
+    assert cb.message.edit_text.await_args.args[0].startswith("dm_sm_topic_pick_reg")
+    assert ("dm_sm_hours", {"hours": 6}) in calls
+    assert next(kw for key, kw in calls if key == "dm_sm_topic_pick_now") == {
+        "current": "dm_sm_hours"
+    }
+    assert _btn_texts(cb)[2] == "✅ dm_sm_hours"  # 6h = chat value → marked
+    assert _kb_rows(cb) == [
+        [
+            f"dm:smtvs:{GROUP_CHAT_ID}:3:r:1",
+            f"dm:smtvs:{GROUP_CHAT_ID}:3:r:3",
+            f"dm:smtvs:{GROUP_CHAT_ID}:3:r:6",
+        ],
+        [
+            f"dm:smtvs:{GROUP_CHAT_ID}:3:r:12",
+            f"dm:smtvs:{GROUP_CHAT_ID}:3:r:24",
+            f"dm:smtvs:{GROUP_CHAT_ID}:3:r:48",
+        ],
+        [f"dm:smtvs:{GROUP_CHAT_ID}:3:r:0"],
+        [f"dm:smtvm:{GROUP_CHAT_ID}:3:r", f"dm:smtvp:{GROUP_CHAT_ID}:3:r"],
+        [f"dm:smtp:{GROUP_CHAT_ID}:3"],
+        [f"dm:smt:{GROUP_CHAT_ID}:3", "dm:menu"],
+    ]
+    cb.answer.assert_awaited_once()
+
+
+async def test_topic_pick_unlimited_hides_step_buttons(base_data, fsm, monkeypatch):
+    """«∞ без лимита» is marked, and «±1 ч» disappears (nothing to step)."""
+    monkeypatch.setattr(crud, "get_slow_mode", AsyncMock(return_value=_config()))
+    monkeypatch.setattr(
+        crud,
+        "get_slow_mode_topic",
+        AsyncMock(return_value=_override(enabled=True, regular=0)),
+    )
+
+    cb = _cb(f"dm:smtv:{GROUP_CHAT_ID}:3:r")
+    await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
+
+    assert f"dm:smtvm:{GROUP_CHAT_ID}:3:r" not in _all_callbacks(cb)
+    assert f"dm:smtvp:{GROUP_CHAT_ID}:3:r" not in _all_callbacks(cb)
+    assert "✅ dm_sm_topic_pick_unlimited" in _btn_texts(cb)
+
+
+async def test_topic_pick_step_from_unlimited_pins_one_hour(
+    base_data, fsm, monkeypatch
+):
+    """Even if «+1 ч» is pressed for «∞», the result stays a real value."""
+    monkeypatch.setattr(crud, "get_slow_mode", AsyncMock(return_value=_config()))
+    monkeypatch.setattr(
+        crud,
+        "get_slow_mode_topic",
+        AsyncMock(return_value=_override(enabled=True, regular=0)),
+    )
+    set_mock = AsyncMock()
+    monkeypatch.setattr(crud, "set_slow_mode_topic", set_mock)
+
+    cb = _cb(f"dm:smtvp:{GROUP_CHAT_ID}:3:r")
+    await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
+
+    set_mock.assert_awaited_once_with(
+        base_data["session"], GROUP_CHAT_ID, 3, regular_seconds=3600
+    )
+
+
+async def test_topic_pick_set_pins_value_and_redraws(base_data, fsm, monkeypatch):
+    """A preset press writes the role's seconds and redraws the same grid."""
+    monkeypatch.setattr(crud, "get_slow_mode", AsyncMock(return_value=_config()))
+    set_mock = AsyncMock()
+    monkeypatch.setattr(crud, "set_slow_mode_topic", set_mock)
+
+    cb = _cb(f"dm:smtvs:{GROUP_CHAT_ID}:3:w:12")
+    await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
+
+    set_mock.assert_awaited_once_with(
+        base_data["session"], GROUP_CHAT_ID, 3, wl_seconds=43200
+    )
+    base_data["session"].commit.assert_awaited_once()
+    assert cb.message.edit_text.await_args.args[0].startswith("dm_sm_topic_pick_wl")
+    cb.answer.assert_awaited_once()
+
+
+async def test_topic_pick_zero_means_unlimited(base_data, fsm, monkeypatch):
+    monkeypatch.setattr(crud, "get_slow_mode", AsyncMock(return_value=_config()))
+    set_mock = AsyncMock()
+    monkeypatch.setattr(crud, "set_slow_mode_topic", set_mock)
+
+    cb = _cb(f"dm:smtvs:{GROUP_CHAT_ID}:3:r:0")
+    await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
+
+    set_mock.assert_awaited_once_with(
+        base_data["session"], GROUP_CHAT_ID, 3, regular_seconds=0
+    )
+
+
+async def test_topic_pick_rejects_out_of_range(base_data, fsm, monkeypatch):
+    """721h is refused with an alert and nothing is written."""
+    monkeypatch.setattr(crud, "get_slow_mode", AsyncMock(return_value=_config()))
+    set_mock = AsyncMock()
+    monkeypatch.setattr(crud, "set_slow_mode_topic", set_mock)
+
+    cb = _cb(f"dm:smtvs:{GROUP_CHAT_ID}:3:r:721")
+    await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
+
+    set_mock.assert_not_awaited()
+    cb.message.edit_text.assert_not_awaited()
+    assert cb.answer.await_args.kwargs.get("show_alert") is True
+
+
+@pytest.mark.parametrize("delta,expected", [(-1, 18000), (1, 25200)])
+async def test_topic_pick_step_touches_one_role_only(
+    base_data, fsm, monkeypatch, delta, expected
+):
+    monkeypatch.setattr(crud, "get_slow_mode", AsyncMock(return_value=_config()))
+    monkeypatch.setattr(
+        crud,
+        "get_slow_mode_topic",
+        AsyncMock(return_value=_override(enabled=True, regular=21600, wl=3600)),
+    )
+    set_mock = AsyncMock()
+    monkeypatch.setattr(crud, "set_slow_mode_topic", set_mock)
+
+    action = "smtvm" if delta < 0 else "smtvp"
+    cb = _cb(f"dm:{action}:{GROUP_CHAT_ID}:3:r")
+    await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
+
+    set_mock.assert_awaited_once_with(
+        base_data["session"], GROUP_CHAT_ID, 3, regular_seconds=expected
+    )
+
+
+async def test_topic_pick_step_clamps_at_one_hour(base_data, fsm, monkeypatch):
+    monkeypatch.setattr(crud, "get_slow_mode", AsyncMock(return_value=_config()))
+    monkeypatch.setattr(
+        crud,
+        "get_slow_mode_topic",
+        AsyncMock(return_value=_override(enabled=True, regular=3600)),
+    )
+    set_mock = AsyncMock()
+    monkeypatch.setattr(crud, "set_slow_mode_topic", set_mock)
+
+    cb = _cb(f"dm:smtvm:{GROUP_CHAT_ID}:3:r")
+    await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
+
+    set_mock.assert_awaited_once_with(
+        base_data["session"], GROUP_CHAT_ID, 3, regular_seconds=3600
+    )
+
+
+async def test_topic_pick_inherit_clears_single_role(base_data, fsm, monkeypatch):
+    """«↩️ Как в чате» in the grid stores NULL for that role only."""
+    monkeypatch.setattr(crud, "get_slow_mode", AsyncMock(return_value=_config()))
+    monkeypatch.setattr(
+        crud,
+        "get_slow_mode_topic",
+        AsyncMock(return_value=_override(enabled=True, regular=7200, wl=3600)),
+    )
+    set_mock = AsyncMock()
+    monkeypatch.setattr(crud, "set_slow_mode_topic", set_mock)
+
+    cb = _cb(f"dm:smtvi:{GROUP_CHAT_ID}:3:r")
+    await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
+
+    set_mock.assert_awaited_once_with(
+        base_data["session"], GROUP_CHAT_ID, 3, regular_seconds=None
+    )
+    assert cb.message.edit_text.await_args.args[0].startswith("dm_sm_topic_pick_reg")
+
+
+async def test_topic_pick_hides_inherit_without_own_value(base_data, fsm, monkeypatch):
+    """While a role has no value of its own there is nothing to reset."""
+    monkeypatch.setattr(crud, "get_slow_mode", AsyncMock(return_value=_config()))
+
+    cb = _cb(f"dm:smtv:{GROUP_CHAT_ID}:3:w")
+    await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
+
+    assert f"dm:smtvi:{GROUP_CHAT_ID}:3:w" not in _all_callbacks(cb)
+    # …но ручной ввод и возврат к ветке остаются доступными.
+    assert f"dm:smtp:{GROUP_CHAT_ID}:3" in _all_callbacks(cb)
+    assert f"dm:smt:{GROUP_CHAT_ID}:3" in _all_callbacks(cb)
+
+
+async def test_topic_pick_shows_inherit_with_own_value(base_data, fsm, monkeypatch):
+    monkeypatch.setattr(crud, "get_slow_mode", AsyncMock(return_value=_config()))
+    monkeypatch.setattr(
+        crud,
+        "get_slow_mode_topic",
+        AsyncMock(return_value=_override(enabled=True, wl=3600)),
+    )
+
+    cb = _cb(f"dm:smtv:{GROUP_CHAT_ID}:3:w")
+    await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
+
+    assert f"dm:smtvi:{GROUP_CHAT_ID}:3:w" in _all_callbacks(cb)
+
+
 async def test_topic_callbacks_reject_malformed_data(base_data, fsm):
     for data in (
         f"dm:smt:{GROUP_CHAT_ID}",
         f"dm:smtx:{GROUP_CHAT_ID}:x",
         "dm:smtl:abc",
+        f"dm:smtv:{GROUP_CHAT_ID}",
+        f"dm:smtv:{GROUP_CHAT_ID}:3:x",
+        f"dm:smtvs:{GROUP_CHAT_ID}:3:r",
+        f"dm:smtvs:{GROUP_CHAT_ID}:3:r:abc",
+        f"dm:smtvm:{GROUP_CHAT_ID}:3:x",
     ):
         cb = _cb(data)
         await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
