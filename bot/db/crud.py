@@ -69,6 +69,10 @@ _SETTINGS_FIELDS = frozenset(
         "newbie_period",
         "triggers_enabled",
         "stats_enabled",
+        "sm_warn_text",
+        "sm_warn_limit",
+        "sm_punish_action",
+        "sm_punish_duration",
     }
 )
 

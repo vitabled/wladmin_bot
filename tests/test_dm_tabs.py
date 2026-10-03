@@ -211,6 +211,7 @@ async def test_slow_mode_callback_opens_the_topic_list(base_data, fsm, monkeypat
         [f"dm:smc:{GROUP_CHAT_ID}"],
         [f"dm:smball:{GROUP_CHAT_ID}"],
         [f"dm:smadd:{GROUP_CHAT_ID}"],
+        [f"dm:smpun:{GROUP_CHAT_ID}"],
         [f"dm:smback:{GROUP_CHAT_ID}"],
     ]
     cb.answer.assert_awaited_once()
@@ -238,6 +239,7 @@ async def test_slow_mode_on_empty_topics_shows_hint_not_saved(
         f"dm:smc:{GROUP_CHAT_ID}",
         f"dm:smball:{GROUP_CHAT_ID}",
         f"dm:smadd:{GROUP_CHAT_ID}",
+        f"dm:smpun:{GROUP_CHAT_ID}",
         f"dm:smback:{GROUP_CHAT_ID}",
     ]
     assert await fsm.get_state() == dm_menu.DmSlowMode.awaiting_topics
@@ -345,8 +347,9 @@ async def test_slow_mode_on_with_topics_goes_to_awaiting_topics(
     assert rows[5][0].callback_data == f"dm:smbdone:{GROUP_CHAT_ID}"
     assert rows[6][0].callback_data == f"dm:smrefresh:{GROUP_CHAT_ID}"
     assert rows[7][0].callback_data == f"dm:smadd:{GROUP_CHAT_ID}"
+    assert rows[8][0].callback_data == f"dm:smpun:{GROUP_CHAT_ID}"
     # nav row: panel back + home
-    assert [btn.callback_data for btn in rows[8]] == [
+    assert [btn.callback_data for btn in rows[9]] == [
         f"dm:g:{GROUP_CHAT_ID}",
         "dm:menu",
     ]

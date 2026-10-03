@@ -117,6 +117,7 @@ async def test_empty_topics_shows_hint_and_does_not_save(base_data, fsm, monkeyp
         f"dm:smc:{GROUP_CHAT_ID}",
         f"dm:smball:{GROUP_CHAT_ID}",
         f"dm:smadd:{GROUP_CHAT_ID}",
+        f"dm:smpun:{GROUP_CHAT_ID}",
         f"dm:smback:{GROUP_CHAT_ID}",
     ]
     # Pending config is retained so «Все ветки» can still save it.
@@ -230,6 +231,7 @@ async def test_refresh_still_empty_keeps_hint_screen(base_data, fsm, monkeypatch
         f"dm:smc:{GROUP_CHAT_ID}",
         f"dm:smball:{GROUP_CHAT_ID}",
         f"dm:smadd:{GROUP_CHAT_ID}",
+        f"dm:smpun:{GROUP_CHAT_ID}",
         f"dm:smback:{GROUP_CHAT_ID}",
     ]
 

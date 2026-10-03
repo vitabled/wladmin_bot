@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import html
+from collections.abc import Callable
 
 from bot.constants import DEFAULT_WELCOME_TEXT, MAX_MESSAGE_LENGTH
 from bot.emoji import decorate
@@ -64,6 +65,38 @@ def truncate_text(text: str, max_length: int = MAX_MESSAGE_LENGTH) -> str:
     if len(text) > max_length:
         return text[: max_length - 1] + "…"
     return text
+
+
+def punish_duration_label(_: Callable[..., str], seconds: int | None) -> str:
+    """Localized length of a punishment: «24 ч» / «3 дн» / «навсегда»."""
+    if not seconds or seconds <= 0:
+        return _("dm_sm_punish_dur_forever")
+    if seconds % 86400 == 0:
+        return _("dm_sm_punish_dur_days", days=seconds // 86400)
+    return _("dm_sm_punish_dur_hours", hours=max(1, seconds // 3600))
+
+
+def punish_action_label(_: Callable[..., str], action: str, seconds: int | None) -> str:
+    """Localized punishment, duration included for mute/ban (kick is instant).
+
+    Used both by the settings screen and by the notice posted in the chat after
+    a punishment, so the wording cannot drift between the two.
+    """
+    label = _(
+        {
+            "kick": "dm_sm_punish_action_kick",
+            "ban": "dm_sm_punish_action_ban",
+        }.get(action, "dm_sm_punish_action_mute")
+    )
+    if action == "kick":
+        return label
+    if not seconds or seconds <= 0:
+        return _("dm_sm_punish_action_forever", action=label)
+    return _(
+        "dm_sm_punish_action_for",
+        action=label,
+        duration=punish_duration_label(_, seconds),
+    )
 
 
 def format_duration(seconds: int | None) -> str:

@@ -109,6 +109,16 @@ class ChatSettings(Base):
     # Triggers / auto-replies (Phase 3)
     triggers_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # Slow-mode violations (chat-level, deliberately NOT on the slow_mode row:
+    # they must survive the rule being switched off). `sm_warn_limit == 0` means
+    # «never punish»; `sm_punish_duration` NULL means «forever».
+    sm_warn_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sm_warn_limit: Mapped[int] = mapped_column(Integer, default=0)
+    sm_punish_action: Mapped[str] = mapped_column(String(20), default="mute")
+    sm_punish_duration: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, default=3600
+    )
+
     # Statistics (Phase 4)
     stats_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 

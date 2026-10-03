@@ -23,24 +23,37 @@ row, so admins keep one global default without having to pre-enable it). A row
 turned on with no own value falls back to the chat's values, or to the 6 h /
 3 h defaults when the chat has no row at all.
 
+Violations escalate: a blocked message is deleted and its author warned, and
+once ``chat_settings.sm_warn_limit`` messages have been blocked in the same
+window the configured punishment (mute/kick/ban for ``sm_punish_duration``) is
+applied. The warn text is ``chat_settings.sm_warn_text`` when the owner set one,
+otherwise the built-in one.
+
 Fail-open by design: non-group chats, bots/anonymous senders, disabled config
 and non-positive intervals are always allowed. Callers must not let slow mode
-break the message pipeline.
+break the message pipeline — every step of the punishment path is best-effort.
 """
 
 from __future__ import annotations
 
 import logging
 import time
+from typing import Any
 
 from bot.constants import SCAM_SOURCE_VERIFIED
 from bot.db import crud
-from bot.utils.text import format_duration
+from bot.utils.text import build_mention, format_duration, punish_action_label
 
 logger = logging.getLogger(__name__)
 
 # Per-chat key prefix: slow:{chat_id}:{topic}:{user_id}
 _KEY_PREFIX = "slow:"
+
+# Blocked-message counter per chat+topic+user (punishment escalation).
+_VIOLATION_PREFIX = "slowviol:"
+
+# Punishment actions accepted from the settings; anything else falls back to mute.
+PUNISH_ACTIONS = ("mute", "kick", "ban")
 
 GROUP_TYPES = ("group", "supergroup")
 
@@ -133,14 +146,113 @@ async def check_and_record(bot, message, data: dict) -> bool:
                 await bot.delete_message(message.chat.id, message.message_id)
             except Exception:
                 pass
-            try:
-                await message.reply(
-                    data["_"]("slow_mode_blocked", wait=format_duration(remaining))
-                )
-            except Exception:
-                pass
+            await _warn_author(bot, message, data, remaining)
+            await _count_violation(bot, message, data, interval, topic, user)
             return False
 
     # (h) Allowed: record the timestamp, expire just past the interval.
     await data["redis"].set(key, str(now), ttl=interval + 60)
     return True
+
+
+async def _warn_author(bot, message, data: dict, remaining: int) -> None:
+    """Reply to a blocked message with the owner's text, or the built-in one.
+
+    The custom text goes out with ``parse_mode="HTML"`` (the same trust model as
+    ``welcome_text``); if Telegram rejects the markup the message is retried as
+    plain text so the author always sees something.
+    """
+    settings = data.get("settings") or {}
+    text = (settings.get("sm_warn_text") or "").strip()
+    try:
+        if text:
+            try:
+                await message.reply(text, parse_mode="HTML")
+            except Exception:
+                await message.reply(text)
+        else:
+            await message.reply(
+                data["_"]("slow_mode_blocked", wait=format_duration(remaining))
+            )
+    except Exception:
+        pass
+
+
+async def _count_violation(
+    bot, message, data: dict, interval: int, topic: int, user
+) -> None:
+    """Count a blocked message; punish the author once the limit is reached.
+
+    Violations are counted in the same window as the slowdown itself (the
+    counter expires with the timestamp key), so an occasional offender starts
+    clean after the interval. ``sm_warn_limit <= 0`` means «never punish».
+    """
+    settings = data.get("settings") or {}
+    limit = _as_int(settings.get("sm_warn_limit"), 0)
+    if limit <= 0:
+        return
+    redis = data.get("redis")
+    if redis is None:
+        return
+    key = f"{_VIOLATION_PREFIX}{message.chat.id}:{topic}:{user.id}"
+    # ``_as_int`` also keeps this honest for a client that returns something
+    # unexpected: a counter we cannot read is a counter we do not punish on.
+    count = _as_int(await redis.incr(key), None)
+    if count is None:  # Redis error: fail open, never punish on a lost counter
+        return
+    if count < limit:
+        if count == 1:
+            await redis.expire(key, max(interval, 60) + 60)
+        return
+    # Limit reached: punish once and start the count over, so the next spree
+    # has to earn the punishment again.
+    await redis.delete(key)
+    await _punish(bot, message, data, user)
+
+
+async def _punish(bot, message, data: dict, user) -> None:
+    """Apply the configured punishment and announce it in the chat."""
+    settings = data.get("settings") or {}
+    action = str(settings.get("sm_punish_action") or "mute").lower()
+    if action not in PUNISH_ACTIONS:
+        action = "mute"
+    duration = _as_int(settings.get("sm_punish_duration"), None) or None
+    session = data.get("session")
+    chat_id = message.chat.id
+    # Imported here: ``bot.handlers`` pulls in the routers, which import this
+    # service — a module-level import would close a cycle.
+    from bot.handlers.actions import do_ban, do_kick, do_mute
+
+    reason = data["_"]("sm_punish_reason")
+    try:
+        if action == "kick":
+            ok = await do_kick(bot, session, chat_id, bot.id, user.id, reason)
+        elif action == "ban":
+            ok = await do_ban(bot, session, chat_id, bot.id, user.id, duration, reason)
+        else:
+            ok = await do_mute(bot, session, chat_id, bot.id, user.id, duration, reason)
+    except Exception:
+        logger.warning("slow_mode: punishment failed", exc_info=True)
+        return
+    if not ok:
+        return
+    try:
+        await bot.send_message(
+            chat_id,
+            data["_"](
+                "sm_punish_applied",
+                user=build_mention(user.id, user.full_name),
+                action=punish_action_label(data["_"], action, duration),
+            ),
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+
+
+def _as_int(value: Any, default: int | None) -> int | None:
+    """Tolerant int cast for settings coming from Redis/JSON."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default

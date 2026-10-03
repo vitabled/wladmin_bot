@@ -48,15 +48,26 @@ from bot.handlers.menu import _TOGGLE_FIELDS, build_menu
 from bot.handlers.moderation import _reason_suffix, prepare_action
 from bot.handlers.scam import build_scam_verdict, map_scam_error
 from bot.services.broadcast import send_broadcast
+from bot.services.slow_mode import PUNISH_ACTIONS
 from bot.services.stats import StatsService
 from bot.utils.targets import resolve_target
-from bot.utils.text import build_mention, escape_html, format_duration
+from bot.utils.text import (
+    build_mention,
+    escape_html,
+    format_duration,
+    punish_action_label,
+    punish_duration_label,
+)
 
 logger = logging.getLogger(__name__)
 
 router = Router()
 
 _PREFIX = "dm"
+
+# Longest warning text accepted from the owner (Telegram caption/message limit
+# leaves no room for a wall of text in a chat notice anyway).
+_SM_WARN_TEXT_MAX = 1024
 WEBAPP_URL = "https://admin.whitelistmarket.lol"
 
 # Groups list pagination: groups per page in the DM list.
@@ -132,15 +143,17 @@ class DmSlowMode(StatesGroup):
     ``awaiting_config`` parses the ``вкл|выкл [hours] [hours]`` line;
     ``awaiting_topics`` is the topic list step (scope toggles + per-topic
     ⚙️ buttons) shown after «вкл» and from the entry screen;
-    ``awaiting_topic_id`` accepts a hand-typed thread id; and
+    ``awaiting_topic_id`` accepts a hand-typed thread id;
     ``awaiting_topic_params`` parses per-topic intervals
-    (``6 3`` | ``вкл 6 3`` | ``выкл`` | ``сброс``).
+    (``6 3`` | ``вкл 6 3`` | ``выкл`` | ``сброс``); and
+    ``awaiting_sm_punish_text`` takes the warning text shown to violators.
     """
 
     awaiting_config = State()
     awaiting_topics = State()
     awaiting_topic_id = State()
     awaiting_topic_params = State()
+    awaiting_sm_punish_text = State()
 
 
 class DmWl(StatesGroup):
@@ -625,6 +638,7 @@ def _build_sm_topics_kb(
             )
         ]
     )
+    rows.append([_sm_punish_row(_raw, chat_id)])
     rows.append(
         [
             types.InlineKeyboardButton(
@@ -737,15 +751,15 @@ def _build_sm_topic_pick_kb(
     thread_id: int,
     current: int,
     own: bool,
-    off_here: bool = False,
 ) -> types.InlineKeyboardMarkup:
-    """Hour grid for a topic: presets, ±1 ч, reset, on/off, manual, nav.
+    """Hour grid for a topic: presets, ±1 ч, reset, manual, nav.
 
     The matching preset carries «✅», so the screen stays stateless — every
     press redraws it from the database. «±1 ч» is hidden for «∞» (0); «↩️ Как
     в чате» only shows when this topic has its own value; the typed prompt is
-    one tap away for unusual values. The rule for this topic is switched off
-    (and back on) from here too — there is no separate switch button.
+    one tap away for unusual values. There is no «⛔ Выключить здесь» button:
+    a topic either has its own limit («↩️ Как в чате» drops it) or follows the
+    chat — switching a single topic off is not a setting the owner wants.
     """
     rows: list[list[types.InlineKeyboardButton]] = []
     row: list[types.InlineKeyboardButton] = []
@@ -796,20 +810,6 @@ def _build_sm_topic_pick_kb(
     rows.append(
         [
             types.InlineKeyboardButton(
-                text=_raw(
-                    "dm_sm_topic_switch_on" if off_here else "dm_sm_topic_switch_off"
-                ),
-                callback_data=(
-                    f"{_PREFIX}:smtvc:{chat_id}:{thread_id}"
-                    if off_here
-                    else f"{_PREFIX}:smtvo:{chat_id}:{thread_id}"
-                ),
-            )
-        ]
-    )
-    rows.append(
-        [
-            types.InlineKeyboardButton(
                 text=_raw("dm_sm_topic_pick_manual"),
                 callback_data=f"{_PREFIX}:smtp:{chat_id}:{thread_id}",
                 icon_custom_emoji_id=_ICON_SETTINGS,  # ⚙
@@ -818,6 +818,161 @@ def _build_sm_topic_pick_kb(
     )
     rows.extend(_build_sm_topic_kb(_raw, chat_id, thread_id).inline_keyboard)
     return types.InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+# --- Punishment for slow-mode violations (dm:smpun:*) --------------------- #
+
+
+def _sm_punish_limit(settings: dict[str, Any]) -> int:
+    """Warnings before the punishment; ``0`` (or junk) means «never punish»."""
+    try:
+        return max(0, int(settings.get("sm_warn_limit") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _sm_punish_action(settings: dict[str, Any]) -> str:
+    """Configured action, falling back to «mute» for anything unexpected."""
+    action = str(settings.get("sm_punish_action") or "mute").lower()
+    return action if action in PUNISH_ACTIONS else "mute"
+
+
+def _sm_punish_duration(settings: dict[str, Any]) -> int | None:
+    """Configured duration in seconds; ``None`` = «forever»."""
+    try:
+        return int(settings.get("sm_punish_duration")) or None
+    except (TypeError, ValueError):
+        return None
+
+
+def _sm_punish_text(_: Callable[..., str], settings: dict[str, Any]) -> str:
+    """Body of the punishment screen: the current value of all four settings.
+
+    Sent with ``parse_mode="HTML"`` (see ``_edit_or_answer``), so the stored
+    warning text is escaped — it is user input, and a stray ``<`` would break
+    the whole screen.
+    """
+    limit = _sm_punish_limit(settings)
+    count_line = (
+        _("dm_sm_punish_count_off_line")
+        if limit <= 0
+        else _("dm_sm_punish_count_line", count=limit)
+    )
+    custom = (settings.get("sm_warn_text") or "").strip()
+    text = escape_html(custom[:120]) if custom else _("dm_sm_punish_text_default")
+    action = punish_action_label(
+        _, _sm_punish_action(settings), _sm_punish_duration(settings)
+    )
+    return (
+        f"{_('dm_sm_punish_title')}\n\n"
+        f"{_('dm_sm_punish_now', count_line=count_line, action=action, text=text)}\n\n"
+        f"{_('dm_sm_punish_hint')}"
+    )
+
+
+def _build_sm_punish_kb(
+    _raw: Callable[..., str], chat_id: int, settings: dict[str, Any]
+) -> types.InlineKeyboardMarkup:
+    """Punishment screen: warn text, warning count, action and duration.
+
+    The current value carries «✅» exactly like the hour grid, so every press
+    redraws the screen from the settings and no state has to be kept. The
+    duration only matters for mute/ban — a kick is instant.
+    """
+    limit = _sm_punish_limit(settings)
+    action = _sm_punish_action(settings)
+    duration = _sm_punish_duration(settings)
+    rows: list[list[types.InlineKeyboardButton]] = [
+        [
+            types.InlineKeyboardButton(
+                text=_raw("dm_sm_punish_text_btn"),
+                callback_data=f"{_PREFIX}:smpunt:{chat_id}",
+            )
+        ]
+    ]
+    rows.append(
+        [
+            types.InlineKeyboardButton(
+                text=f"{'✅ ' if value == limit else ''}{value}",
+                callback_data=f"{_PREFIX}:smpunc:{chat_id}:{value}",
+            )
+            for value in (1, 2, 3, 5, 10)
+        ]
+    )
+    rows.append(
+        [
+            types.InlineKeyboardButton(
+                text=(
+                    f"{'✅ ' if limit <= 0 else ''}" f"{_raw('dm_sm_punish_count_off')}"
+                ),
+                callback_data=f"{_PREFIX}:smpunc:{chat_id}:0",
+            )
+        ]
+    )
+    rows.append(
+        [
+            types.InlineKeyboardButton(
+                text=(
+                    f"{'✅ ' if value == action else ''}"
+                    f"{_raw(f'dm_sm_punish_action_{value}')}"
+                ),
+                callback_data=f"{_PREFIX}:smpuna:{chat_id}:{value}",
+            )
+            for value in PUNISH_ACTIONS
+        ]
+    )
+    rows.append(
+        [
+            types.InlineKeyboardButton(
+                text=(
+                    f"{'✅ ' if (duration or 0) == seconds else ''}"
+                    f"{punish_duration_label(_raw, seconds)}"
+                ),
+                callback_data=f"{_PREFIX}:smpund:{chat_id}:{seconds}",
+            )
+            for seconds in (3600, 86400, 604800, 0)
+        ]
+    )
+    rows.extend(_sm_punish_nav_kb(_raw, chat_id).inline_keyboard)
+    return types.InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _sm_punish_nav_kb(
+    _raw: Callable[..., str], chat_id: int
+) -> types.InlineKeyboardMarkup:
+    """Ways out of the punishment screen and its text prompt."""
+    return types.InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                types.InlineKeyboardButton(
+                    text=_raw("dm_sm_punish_back"),
+                    callback_data=f"{_PREFIX}:smpun:{chat_id}",
+                    icon_custom_emoji_id=_ICON_BACK,  # ◀
+                )
+            ],
+            [
+                types.InlineKeyboardButton(
+                    text=_raw("dm_sm_topics_back"),
+                    callback_data=f"{_PREFIX}:smtl:{chat_id}",
+                ),
+                types.InlineKeyboardButton(
+                    text=_raw("dm_menu_home"),
+                    callback_data=f"{_PREFIX}:menu",
+                    icon_custom_emoji_id=_ICON_HOME,  # 🏠
+                ),
+            ],
+        ]
+    )
+
+
+def _sm_punish_row(
+    _raw: Callable[..., str], chat_id: int
+) -> types.InlineKeyboardButton:
+    """Entry button of the punishment screen (bottom of the topic list)."""
+    return types.InlineKeyboardButton(
+        text=_raw("dm_sm_punish_btn"),
+        callback_data=f"{_PREFIX}:smpun:{chat_id}",
+    )
 
 
 def _build_sm_topic_prompt_kb(
@@ -849,6 +1004,10 @@ def _build_sm_topics_empty_kb(
     builder.button(
         text=_raw("dm_sm_topics_add"),
         callback_data=f"{_PREFIX}:smadd:{chat_id}",
+    )
+    builder.button(
+        text=_raw("dm_sm_punish_btn"),
+        callback_data=f"{_PREFIX}:smpun:{chat_id}",
     )
     builder.button(
         text=_raw("dm_sm_topics_back"),
@@ -1057,10 +1216,6 @@ async def on_dm_callback(
         await _dm_sm_topics_list(callback, action, state, _, _raw, session)
         return
 
-    if action.startswith("smtx:"):
-        await _dm_sm_topic_switch(callback, action, state, _, _raw, session)
-        return
-
     if action.startswith("smtvs:"):
         await _dm_sm_topic_pick_set(callback, action, state, _, _raw, session)
         return
@@ -1071,12 +1226,6 @@ async def on_dm_callback(
 
     if action.startswith("smtvi:"):
         await _dm_sm_topic_pick_inherit(callback, action, state, _, _raw, session)
-        return
-
-    if action.startswith(("smtvo:", "smtvc:")):
-        await _dm_sm_topic_pick_power(
-            callback, action, state, _, _raw, session, on=action.startswith("smtvc:")
-        )
         return
 
     if action.startswith("smtv:"):
@@ -1097,6 +1246,34 @@ async def on_dm_callback(
 
     if action.startswith("smc:"):
         await _dm_sm_chat_rule_toggle(callback, action, state, _, _raw, session)
+        return
+
+    # Punishment for slow-mode violations (smpun*): text prompt, then the three
+    # value families. The bare ``smpun:`` screen MUST be matched last.
+    if action.startswith("smpunt:"):
+        await _dm_sm_punish_text_prompt(callback, action, state, _, _raw, session)
+        return
+
+    if action.startswith("smpunc:"):
+        await _dm_sm_punish_count(
+            callback, action, state, _, _raw, session, data["redis"]
+        )
+        return
+
+    if action.startswith("smpuna:"):
+        await _dm_sm_punish_action(
+            callback, action, state, _, _raw, session, data["redis"]
+        )
+        return
+
+    if action.startswith("smpund:"):
+        await _dm_sm_punish_duration(
+            callback, action, state, _, _raw, session, data["redis"]
+        )
+        return
+
+    if action.startswith("smpun:"):
+        await _dm_sm_punish(callback, action, state, _, _raw, session)
         return
 
     if action.startswith("sm:"):
@@ -1700,10 +1877,179 @@ async def _dm_sm_topics_done(
 # (dm:smtl:<chat> — список веток, dm:smt:<chat>:<thread> — сразу сетка часов,
 #  промежуточного экрана настроек ветки нет;
 #  dm:smtvs:/dm:smtvm:/dm:smtvp: — выбрать часы / ±1 ч,
-#  dm:smtvo:/dm:smtvc: — выкл/вкл здесь, dm:smtvi: — как в чате,
-#  dm:smtp: — ввод вручную (dm:smtx:/dm:smtr: — старые кнопки, оставлены для
+#  dm:smtvi: — как в чате,
+#  dm:smtp: — ввод вручную (dm:smtr: — старая кнопка, оставлена для
 #  уже отправленных сообщений))
 # --------------------------------------------------------------------------- #
+async def _sm_seed_topics_state(
+    state: FSMContext, session: AsyncSession, chat_id: int
+) -> Any:
+    """Put the FSM on the slow-mode topic step; returns the chat's config.
+
+    Both the topic list and the punishment screen live «inside» the slow-mode
+    flow: seeding the same state means a screen opened from an old message still
+    has a working «✅ Готово» and «⬅️ К веткам».
+    """
+    cfg = await crud.get_slow_mode(session, chat_id)
+    selected = list(cfg.topic_ids) if cfg is not None and cfg.topic_ids else []
+    await state.set_state(DmSlowMode.awaiting_topics)
+    await state.update_data(
+        chat_id=chat_id,
+        selected_topics=selected,
+        pending_sm={
+            "enabled": cfg.enabled if cfg is not None else True,
+            "regular": cfg.regular_seconds if cfg is not None else 21600,
+            "wl": cfg.wl_seconds if cfg is not None else 10800,
+        },
+    )
+    return cfg
+
+
+async def _sm_settings_dict(session: AsyncSession, chat_id: int) -> dict[str, Any]:
+    """The chat's settings as a plain dict (the shape the Redis copy has)."""
+    return crud.settings_to_dict(await crud.get_or_create_settings(session, chat_id))
+
+
+async def _sm_show_punish(
+    callback: types.CallbackQuery,
+    chat_id: int,
+    _: Callable[..., str],
+    _raw: Callable[..., str],
+    session: AsyncSession,
+) -> None:
+    """Draw the punishment screen from the settings (never from FSM state)."""
+    settings = await _sm_settings_dict(session, chat_id)
+    await _edit_or_answer(
+        callback,
+        _sm_punish_text(_, settings),
+        _build_sm_punish_kb(_raw, chat_id, settings),
+    )
+
+
+async def _dm_sm_punish(
+    callback: types.CallbackQuery,
+    action: str,
+    state: FSMContext,
+    _: Callable[..., str],
+    _raw: Callable[..., str],
+    session: AsyncSession,
+) -> None:
+    """«⚠️ Наказание за нарушения»: how violators are warned and punished.
+
+    One tap from the topic list (``dm:smpun:``) with no sub-menu in between:
+    the four settings are the screen itself.
+    """
+    ids = _sm_ids(action, 1)
+    if ids is None:
+        await callback.answer()
+        return
+    chat_id = ids[0]
+    await _sm_seed_topics_state(state, session, chat_id)
+    await _sm_show_punish(callback, chat_id, _, _raw, session)
+    await callback.answer()
+
+
+async def _dm_sm_punish_text_prompt(
+    callback: types.CallbackQuery,
+    action: str,
+    state: FSMContext,
+    _: Callable[..., str],
+    _raw: Callable[..., str],
+    session: AsyncSession,
+) -> None:
+    """«📝 Текст предупреждения»: ask for the text shown to violators."""
+    ids = _sm_ids(action, 1)
+    if ids is None:
+        await callback.answer()
+        return
+    chat_id = ids[0]
+    await state.set_state(DmSlowMode.awaiting_sm_punish_text)
+    await state.update_data(chat_id=chat_id)
+    await _edit_or_answer(
+        callback,
+        _("dm_sm_punish_text_prompt"),
+        _sm_punish_nav_kb(_raw, chat_id),
+    )
+    await callback.answer()
+
+
+async def _dm_sm_punish_count(
+    callback: types.CallbackQuery,
+    action: str,
+    state: FSMContext,
+    _: Callable[..., str],
+    _raw: Callable[..., str],
+    session: AsyncSession,
+    redis: Any,
+) -> None:
+    """Warnings before the punishment (``dm:smpunc:``; 0 = never punish)."""
+    ids = _sm_ids(action, 2)
+    if ids is None:
+        await callback.answer()
+        return
+    chat_id, value = ids
+    await crud.update_settings(session, chat_id, sm_warn_limit=max(0, value))
+    await session.commit()
+    await redis.invalidate_settings(chat_id)
+    await _sm_show_punish(callback, chat_id, _, _raw, session)
+    await callback.answer()
+
+
+async def _dm_sm_punish_action(
+    callback: types.CallbackQuery,
+    action: str,
+    state: FSMContext,
+    _: Callable[..., str],
+    _raw: Callable[..., str],
+    session: AsyncSession,
+    redis: Any,
+) -> None:
+    """Punishment type: mute / kick / ban (``dm:smpuna:``).
+
+    Parsed by hand: the value is a word, so ``_sm_ids`` (numeric-only) cannot
+    read this callback.
+    """
+    parts = action.split(":")
+    value = parts[-1].lower() if parts else ""
+    try:
+        chat_id = int(parts[1])
+    except (IndexError, ValueError):
+        await callback.answer()
+        return
+    if len(parts) != 3 or value not in PUNISH_ACTIONS:
+        await callback.answer()
+        return
+    await crud.update_settings(session, chat_id, sm_punish_action=value)
+    await session.commit()
+    await redis.invalidate_settings(chat_id)
+    await _sm_show_punish(callback, chat_id, _, _raw, session)
+    await callback.answer()
+
+
+async def _dm_sm_punish_duration(
+    callback: types.CallbackQuery,
+    action: str,
+    state: FSMContext,
+    _: Callable[..., str],
+    _raw: Callable[..., str],
+    session: AsyncSession,
+    redis: Any,
+) -> None:
+    """Punishment duration for mute/ban (``dm:smpund:``; 0 = forever)."""
+    ids = _sm_ids(action, 2)
+    if ids is None:
+        await callback.answer()
+        return
+    chat_id, seconds = ids
+    await crud.update_settings(
+        session, chat_id, sm_punish_duration=(seconds if seconds > 0 else None)
+    )
+    await session.commit()
+    await redis.invalidate_settings(chat_id)
+    await _sm_show_punish(callback, chat_id, _, _raw, session)
+    await callback.answer()
+
+
 def _sm_ids(action: str, count: int) -> list[int] | None:
     """Parse the numeric tail of a callback action (``smt:<chat>:<thread>``)."""
     parts = action.split(":")
@@ -1743,20 +2089,10 @@ async def _dm_sm_topics_list(
         await callback.answer()
         return
     chat_id = ids[0]
-    cfg = await crud.get_slow_mode(session, chat_id)
     topics = await crud.list_topics(session, chat_id)
     overrides = await crud.list_slow_mode_topics(session, chat_id)
+    cfg = await _sm_seed_topics_state(state, session, chat_id)
     selected = list(cfg.topic_ids) if cfg is not None and cfg.topic_ids else []
-    await state.set_state(DmSlowMode.awaiting_topics)
-    await state.update_data(
-        chat_id=chat_id,
-        selected_topics=selected,
-        pending_sm={
-            "enabled": cfg.enabled if cfg is not None else True,
-            "regular": cfg.regular_seconds if cfg is not None else 21600,
-            "wl": cfg.wl_seconds if cfg is not None else 10800,
-        },
-    )
     if not topics and not selected:
         await _edit_or_answer(
             callback,
@@ -1790,66 +2126,6 @@ async def _dm_sm_topic(
         await callback.answer()
         return
     chat_id, thread_id = ids
-    await _sm_show_pick(callback, chat_id, thread_id, _, _raw, session)
-    await callback.answer()
-
-
-async def _dm_sm_topic_switch(
-    callback: types.CallbackQuery,
-    action: str,
-    state: FSMContext,
-    _: Callable[..., str],
-    _raw: Callable[..., str],
-    session: AsyncSession,
-) -> None:
-    """«Включить/выключить здесь»: flip the per-topic switch (``dm:smtx:``).
-
-    A missing row counts as «включено» (the topic follows the chat), so the
-    first press stores an explicit off-override. The scope toggle in the list
-    (``dm:smb:``) is a different thing — see ``_dm_sm_topic_toggle``.
-    """
-    ids = _sm_ids(action, 2)
-    if ids is None:
-        await callback.answer()
-        return
-    chat_id, thread_id = ids
-    override = await crud.get_slow_mode_topic(session, chat_id, thread_id)
-    # No row / row off → «включить здесь»; row on → «выключить здесь».
-    await crud.set_slow_mode_topic(
-        session,
-        chat_id,
-        thread_id,
-        enabled=override is not None and not override.enabled,
-    )
-    await session.commit()
-    await _sm_show_pick(callback, chat_id, thread_id, _, _raw, session)
-    await callback.answer()
-
-
-async def _dm_sm_topic_pick_power(
-    callback: types.CallbackQuery,
-    action: str,
-    state: FSMContext,
-    _: Callable[..., str],
-    _raw: Callable[..., str],
-    session: AsyncSession,
-    *,
-    on: bool,
-) -> None:
-    """«⛔ Выключить здесь» / «✅ Включить здесь» inside the hour grid.
-
-    The grid is the only place that switches this topic: a missing row counts
-    as «включено» (the topic follows the chat), so switching off stores an
-    explicit off-override. The scope toggle in the list (``dm:smb:``) is a
-    different thing — see ``_dm_sm_topic_toggle``.
-    """
-    ids = _sm_ids(action, 2)
-    if ids is None:
-        await callback.answer()
-        return
-    chat_id, thread_id = ids
-    await crud.set_slow_mode_topic(session, chat_id, thread_id, enabled=on)
-    await session.commit()
     await _sm_show_pick(callback, chat_id, thread_id, _, _raw, session)
     await callback.answer()
 
@@ -1952,12 +2228,11 @@ async def _sm_show_pick(
     override = await crud.get_slow_mode_topic(session, chat_id, thread_id)
     label = await _sm_topic_label(session, chat_id, thread_id)
     own = override is not None and override.regular_seconds is not None
-    off_here = override is not None and not override.enabled
     await _edit_or_answer(
         callback,
         _sm_pick_text(_, cfg, override, label),
         _build_sm_topic_pick_kb(
-            _raw, chat_id, thread_id, _sm_topic_hours(cfg, override), own, off_here
+            _raw, chat_id, thread_id, _sm_topic_hours(cfg, override), own
         ),
     )
 
@@ -2801,11 +3076,10 @@ async def dm_sm_topic_params(
         override = await crud.get_slow_mode_topic(session, chat_id, thread_id)
         label = await _sm_topic_label(session, chat_id, thread_id)
         own = override is not None and override.regular_seconds is not None
-        off_here = override is not None and not override.enabled
         await message.answer(
             _sm_pick_text(_, cfg, override, label),
             reply_markup=_build_sm_topic_pick_kb(
-                _raw, chat_id, thread_id, _sm_topic_hours(cfg, override), own, off_here
+                _raw, chat_id, thread_id, _sm_topic_hours(cfg, override), own
             ),
         )
 
@@ -2859,6 +3133,52 @@ async def dm_sm_topic_params(
     await _sm_set_topic_interval(session, chat_id, thread_id, seconds)
     await session.commit()
     await redraw()
+
+
+@router.message(IsPrivate(), F.text, StateFilter(DmSlowMode.awaiting_sm_punish_text))
+async def dm_sm_punish_text(
+    message: types.Message, state: FSMContext, **data: Any
+) -> None:
+    """Warning text typed by hand (the «📝 Текст предупреждения» step).
+
+    «-» / «сброс» drop the custom text so violators get the built-in wording
+    again; a text over ``_SM_WARN_TEXT_MAX`` characters is refused and the
+    prompt is repeated. The cached settings are invalidated on every write —
+    otherwise the running bot would keep the old text until the cache expires.
+    """
+    _ = data["_"]
+    _raw = data["_raw"]
+    session: AsyncSession = data["session"]
+
+    state_data = await state.get_data()
+    chat_id = state_data.get("chat_id")
+    if chat_id is None:
+        await state.clear()
+        await message.answer(_("dm_menu_title"), reply_markup=build_main_menu(_raw))
+        return
+
+    text = (message.text or "").strip()
+    value: str | None
+    if text.lower() in {"-", "—", "сброс", "reset", "по умолчанию", "default"}:
+        value = None
+    elif len(text) > _SM_WARN_TEXT_MAX:
+        await message.answer(
+            _("dm_sm_punish_text_long"),
+            reply_markup=_sm_punish_nav_kb(_raw, chat_id),
+        )
+        return
+    else:
+        value = text
+
+    await crud.update_settings(session, chat_id, sm_warn_text=value)
+    await session.commit()
+    await data["redis"].invalidate_settings(chat_id)
+    await state.clear()
+    settings = await _sm_settings_dict(session, chat_id)
+    await message.answer(
+        _sm_punish_text(_, settings),
+        reply_markup=_build_sm_punish_kb(_raw, chat_id, settings),
+    )
 
 
 @router.message(IsPrivate(), F.text, StateFilter(DmBroadcast.awaiting_topic_id))
