@@ -12,9 +12,11 @@ non-empty list restricts enforcement to those ``message_thread_id`` values
 scope applies to the whole chat (all topics + non-forum messages).
 
 ``SlowModeTopic`` rows override that for a single thread: ``enabled=False``
-exempts the topic even inside the scope, and its own ``regular_seconds`` /
-``wl_seconds`` replace the chat values (NULL inherits them). Overrides are
-consulted only while the chat-level row is enabled.
+exempts the topic even inside the scope, and the row's own
+``regular_seconds`` sets ONE interval for everyone in that topic (verified
+sellers included) instead of the chat's split; NULL inherits the chat values.
+A legacy per-topic ``wl_seconds`` is ignored. Overrides are consulted only
+while the chat-level row is enabled.
 
 Fail-open by design: non-group chats, bots/anonymous senders, disabled config
 and non-positive intervals are always allowed. Callers must not let slow mode
@@ -81,16 +83,13 @@ async def check_and_record(bot, message, data: dict) -> bool:
     if override is not None:
         if not override.enabled:
             return True
-        regular = (
-            override.regular_seconds
-            if override.regular_seconds is not None
-            else config.regular_seconds
-        )
-        wl = (
-            override.wl_seconds
-            if override.wl_seconds is not None
-            else config.wl_seconds
-        )
+        if override.regular_seconds is not None:
+            # A topic's own value is ONE limit for everyone in it: it is not
+            # split into the chat's regular/WL windows (a legacy per-topic
+            # ``wl_seconds`` is ignored — the settings screen sets one number).
+            regular = wl = override.regular_seconds
+        else:
+            regular, wl = config.regular_seconds, config.wl_seconds
     else:
         if config.topic_ids and topic not in config.topic_ids:
             return True

@@ -652,22 +652,20 @@ def _sm_hours_label(_: Callable[..., str], hours: int) -> str:
     return _("dm_sm_hours", hours=hours)
 
 
-def _sm_hours(cfg: Any, override: Any, role: str) -> int:
-    """Effective hours of a topic+role: the override wins, else the chat value.
+def _sm_topic_hours(cfg: Any, override: Any) -> int:
+    """Effective hours for a topic: its own limit wins, else the chat's.
 
-    ``role`` is ``"r"`` (regular members) or ``"w"`` (verified sellers). A
-    stored 0 means «no limit» and comes back as is; without an own value the
-    chat interval applies (6h/3h defaults when the chat has no config at all).
+    A topic has ONE interval for everyone, so a stored ``regular_seconds`` is
+    what both regular members and sellers get there (a legacy ``wl_seconds``
+    on the row is ignored). A stored 0 means «no limit» and comes back as is;
+    without an own value the chat's regular interval applies (6h default when
+    the chat has no config at all).
     """
-    own = None
-    if override is not None:
-        own = override.regular_seconds if role == "r" else override.wl_seconds
-    if own is not None:
-        return int(own) // 3600
+    if override is not None and override.regular_seconds is not None:
+        return int(override.regular_seconds) // 3600
     if cfg is None:
-        return (21600 if role == "r" else 10800) // 3600
-    value = cfg.regular_seconds if role == "r" else cfg.wl_seconds
-    return int(value) // 3600
+        return 21600 // 3600
+    return int(cfg.regular_seconds) // 3600
 
 
 def _sm_topic_state_text(_: Callable[..., str], cfg: Any, override: Any) -> str:
@@ -680,15 +678,12 @@ def _sm_topic_state_text(_: Callable[..., str], cfg: Any, override: Any) -> str:
         return _("dm_sm_topic_state_inherit", regular=chat_regular, wl=chat_wl)
     if not override.enabled:
         return _("dm_sm_topic_state_off")
-    regular = (
-        override.regular_seconds
-        if override.regular_seconds is not None
-        else cfg.regular_seconds
-    )
-    wl = override.wl_seconds if override.wl_seconds is not None else cfg.wl_seconds
-    if regular == cfg.regular_seconds and wl == cfg.wl_seconds:
+    if override.regular_seconds is None:
         return _("dm_sm_topic_state_inherit", regular=chat_regular, wl=chat_wl)
-    return _("dm_sm_topic_state_own", regular=regular // 3600, wl=wl // 3600)
+    return _(
+        "dm_sm_topic_state_own",
+        hours=_sm_hours_label(_, override.regular_seconds // 3600),
+    )
 
 
 def _sm_topic_screen_text(
@@ -706,20 +701,16 @@ def _sm_topic_screen_text(
     )
 
 
-def _sm_pick_text(
-    _: Callable[..., str], cfg: Any, override: Any, label: str, role: str
-) -> str:
+def _sm_pick_text(_: Callable[..., str], cfg: Any, override: Any, label: str) -> str:
     """Body of the interval picker: heading, current value, topic state.
 
     Everything the buttons need is redrawn from the database, so the screen
     carries no FSM state of its own.
     """
-    heading = _(
-        "dm_sm_topic_pick_reg" if role == "r" else "dm_sm_topic_pick_wl", topic=label
-    )
+    heading = _("dm_sm_topic_pick_all", topic=label)
     return (
         f"{heading}\n\n"
-        f"{_('dm_sm_topic_pick_now', current=_sm_hours_label(_, _sm_hours(cfg, override, role)))}"
+        f"{_('dm_sm_topic_pick_now', current=_sm_hours_label(_, _sm_topic_hours(cfg, override)))}"
         f"\n{_sm_topic_state_text(_, cfg, override)}"
     )
 
@@ -731,16 +722,15 @@ def _build_sm_topic_kb(
     thread_id: int,
     override: Any,
 ) -> types.InlineKeyboardMarkup:
-    """Per-topic slow-mode keyboard: switch, interval pickers, reset, nav.
+    """Per-topic slow-mode keyboard: switch, interval, reset, nav.
 
     The switch flips only this thread («⛔ Выключить здесь» / «✅ Включить
-    здесь»); the two interval buttons open the hour grid for regular members
-    and for sellers (button captions show the effective value), and «↩️ Как в
-    чате» (only when a row exists) drops the override. Nothing needs typing.
+    здесь»); the interval button opens the hour grid (its caption shows the
+    effective value) and «↩️ Как в чате» (only when a row exists) drops the
+    override. Nothing needs typing.
     """
     off_here = override is not None and override.enabled
-    reg_hours = _sm_hours_label(_raw, _sm_hours(cfg, override, "r"))
-    wl_hours = _sm_hours_label(_raw, _sm_hours(cfg, override, "w"))
+    hours = _sm_hours_label(_raw, _sm_topic_hours(cfg, override))
     rows: list[list[types.InlineKeyboardButton]] = [
         [
             types.InlineKeyboardButton(
@@ -752,14 +742,8 @@ def _build_sm_topic_kb(
         ],
         [
             types.InlineKeyboardButton(
-                text=_raw("dm_sm_topic_reg_btn", hours=reg_hours),
-                callback_data=f"{_PREFIX}:smtv:{chat_id}:{thread_id}:r",
-            )
-        ],
-        [
-            types.InlineKeyboardButton(
-                text=_raw("dm_sm_topic_wl_btn", hours=wl_hours),
-                callback_data=f"{_PREFIX}:smtv:{chat_id}:{thread_id}:w",
+                text=_raw("dm_sm_topic_all_btn", hours=hours),
+                callback_data=f"{_PREFIX}:smtv:{chat_id}:{thread_id}",
             )
         ],
     ]
@@ -793,16 +777,15 @@ def _build_sm_topic_pick_kb(
     _raw: Callable[..., str],
     chat_id: int,
     thread_id: int,
-    role: str,
     current: int,
     own: bool,
 ) -> types.InlineKeyboardMarkup:
-    """Hour grid for one topic+role: presets, ±1 ч, reset, manual, nav.
+    """Hour grid for a topic: presets, ±1 ч, reset, manual, nav.
 
     The matching preset carries «✅», so the screen stays stateless — every
     press redraws it from the database. «±1 ч» is hidden for «∞» (0); «↩️ Как
-    в чате» only shows when this topic has its own value for the role; the
-    typed prompt is one tap away for unusual values.
+    в чате» only shows when this topic has its own value; the typed prompt is
+    one tap away for unusual values.
     """
     rows: list[list[types.InlineKeyboardButton]] = []
     row: list[types.InlineKeyboardButton] = []
@@ -811,7 +794,7 @@ def _build_sm_topic_pick_kb(
         row.append(
             types.InlineKeyboardButton(
                 text=f"{mark}{_raw('dm_sm_hours', hours=hours)}",
-                callback_data=f"{_PREFIX}:smtvs:{chat_id}:{thread_id}:{role}:{hours}",
+                callback_data=f"{_PREFIX}:smtvs:{chat_id}:{thread_id}:{hours}",
             )
         )
         if len(row) == 3:
@@ -824,7 +807,7 @@ def _build_sm_topic_pick_kb(
             types.InlineKeyboardButton(
                 text=f"{'✅ ' if current == 0 else ''}"
                 f"{_raw('dm_sm_topic_pick_unlimited')}",
-                callback_data=f"{_PREFIX}:smtvs:{chat_id}:{thread_id}:{role}:0",
+                callback_data=f"{_PREFIX}:smtvs:{chat_id}:{thread_id}:0",
             )
         ]
     )
@@ -833,11 +816,11 @@ def _build_sm_topic_pick_kb(
             [
                 types.InlineKeyboardButton(
                     text=_raw("dm_sm_topic_pick_minus"),
-                    callback_data=f"{_PREFIX}:smtvm:{chat_id}:{thread_id}:{role}",
+                    callback_data=f"{_PREFIX}:smtvm:{chat_id}:{thread_id}",
                 ),
                 types.InlineKeyboardButton(
                     text=_raw("dm_sm_topic_pick_plus"),
-                    callback_data=f"{_PREFIX}:smtvp:{chat_id}:{thread_id}:{role}",
+                    callback_data=f"{_PREFIX}:smtvp:{chat_id}:{thread_id}",
                 ),
             ]
         )
@@ -846,7 +829,7 @@ def _build_sm_topic_pick_kb(
             [
                 types.InlineKeyboardButton(
                     text=_raw("dm_sm_topic_pick_inherit"),
-                    callback_data=f"{_PREFIX}:smtvi:{chat_id}:{thread_id}:{role}",
+                    callback_data=f"{_PREFIX}:smtvi:{chat_id}:{thread_id}",
                 )
             ]
         )
@@ -1711,7 +1694,8 @@ async def _dm_sm_topics_done(
 # --------------------------------------------------------------------------- #
 # Медленный режим: параметры ОТДЕЛЬНОЙ ветки
 # (dm:smtl:<chat> — список, dm:smt:<chat>:<thread> — экран ветки,
-#  dm:smtx: — переключатель, dm:smtp: — свои интервалы, dm:smtr: — как в чате)
+#  dm:smtx: — переключатель, dm:smtv: — лимит для всех, dm:smtp: — ввод вручную,
+#  dm:smtr: — как в чате)
 # --------------------------------------------------------------------------- #
 def _sm_ids(action: str, count: int) -> list[int] | None:
     """Parse the numeric tail of a callback action (``smt:<chat>:<thread>``)."""
@@ -1856,7 +1840,7 @@ async def _dm_sm_topic_set(
     _raw: Callable[..., str],
     session: AsyncSession,
 ) -> None:
-    """«⚙️ Свои интервалы»: ask for the per-topic hours (``dm:smtp:``)."""
+    """«✍️ Ввести вручную»: ask for the topic's limit in hours (``dm:smtp:``)."""
     ids = _sm_ids(action, 2)
     if ids is None:
         await callback.answer()
@@ -1873,61 +1857,58 @@ async def _dm_sm_topic_set(
     await callback.answer()
 
 
-def _sm_pick_ids(action: str) -> tuple[int, int, str] | None:
-    """Parse ``smtv*:<chat>:<thread>:<role>``; role is ``r`` (regular) or ``w``."""
+def _sm_pick_ids(action: str) -> tuple[int, int] | None:
+    """Parse ``smtv*:<chat>:<thread>`` (a legacy trailing role letter is dropped).
+
+    Old buttons shipped a ``:r``/``:w`` segment when the topic had per-role
+    intervals; those presses now set the topic's single «for everyone» value.
+    """
     parts = action.split(":")
-    if len(parts) != 4 or parts[3] not in ("r", "w"):
+    if len(parts) == 4 and parts[3] in ("r", "w"):
+        parts = parts[:3]
+    if len(parts) != 3:
         return None
     try:
-        return int(parts[1]), int(parts[2]), parts[3]
+        return int(parts[1]), int(parts[2])
     except ValueError:
         return None
 
 
-async def _sm_set_role(
+async def _sm_set_topic_interval(
     session: AsyncSession,
     chat_id: int,
     thread_id: int,
-    role: str,
     seconds: int | None,
 ) -> None:
-    """Write one role's interval of the topic override (``None`` = inherit).
+    """Write the topic's interval for EVERYONE (``None`` = follow the chat).
 
-    Only that column is touched (the ``UNSET`` sentinel), so the other role and
-    the per-topic switch keep their values — and a topic that had no row keeps
-    the «on» default it has by definition.
+    ``regular_seconds`` is the single value the rule uses for every role in the
+    topic; a legacy ``wl_seconds`` is cleared on every write so no stale split
+    survives in the database. The per-topic on/off switch is left untouched.
     """
-    if role == "r":
-        await crud.set_slow_mode_topic(
-            session, chat_id, thread_id, regular_seconds=seconds
-        )
-    else:
-        await crud.set_slow_mode_topic(session, chat_id, thread_id, wl_seconds=seconds)
+    await crud.set_slow_mode_topic(
+        session, chat_id, thread_id, regular_seconds=seconds, wl_seconds=None
+    )
 
 
 async def _sm_show_pick(
     callback: types.CallbackQuery,
     chat_id: int,
     thread_id: int,
-    role: str,
     _: Callable[..., str],
     _raw: Callable[..., str],
     session: AsyncSession,
 ) -> None:
-    """Draw the hour grid for one topic+role, marking the current value."""
+    """Draw the topic's hour grid, marking the current value."""
     cfg = await crud.get_slow_mode(session, chat_id)
     override = await crud.get_slow_mode_topic(session, chat_id, thread_id)
     label = await _sm_topic_label(session, chat_id, thread_id)
-    own = False
-    if override is not None:
-        own = (
-            override.regular_seconds if role == "r" else override.wl_seconds
-        ) is not None
+    own = override is not None and override.regular_seconds is not None
     await _edit_or_answer(
         callback,
-        _sm_pick_text(_, cfg, override, label, role),
+        _sm_pick_text(_, cfg, override, label),
         _build_sm_topic_pick_kb(
-            _raw, chat_id, thread_id, role, _sm_hours(cfg, override, role), own
+            _raw, chat_id, thread_id, _sm_topic_hours(cfg, override), own
         ),
     )
 
@@ -1940,13 +1921,13 @@ async def _dm_sm_topic_pick(
     _raw: Callable[..., str],
     session: AsyncSession,
 ) -> None:
-    """«🕒 Обычные / Продавцам»: open the hour grid (``dm:smtv:``)."""
+    """«🕒 Лимит для всех»: open the topic's hour grid (``dm:smtv:``)."""
     ids = _sm_pick_ids(action)
     if ids is None:
         await callback.answer()
         return
-    chat_id, thread_id, role = ids
-    await _sm_show_pick(callback, chat_id, thread_id, role, _, _raw, session)
+    chat_id, thread_id = ids
+    await _sm_show_pick(callback, chat_id, thread_id, _, _raw, session)
     await callback.answer()
 
 
@@ -1960,21 +1941,22 @@ async def _dm_sm_topic_pick_set(
 ) -> None:
     """A preset press: pin the value (0 = «без лимита») and redraw (``smtvs:``)."""
     parts = action.split(":")
-    if len(parts) != 5:
+    if len(parts) == 5 and parts[3] in ("r", "w"):
+        parts = parts[:3] + [parts[4]]  # legacy role segment
+    if len(parts) != 4:
         await callback.answer()
         return
     try:
-        chat_id, thread_id, hours = int(parts[1]), int(parts[2]), int(parts[4])
+        chat_id, thread_id, hours = int(parts[1]), int(parts[2]), int(parts[3])
     except ValueError:
         await callback.answer()
         return
-    role = parts[3]
-    if role not in ("r", "w") or not 0 <= hours <= 720:
+    if not 0 <= hours <= 720:
         await callback.answer(_("dm_sm_topic_pick_bad"), show_alert=True)
         return
-    await _sm_set_role(session, chat_id, thread_id, role, hours * 3600)
+    await _sm_set_topic_interval(session, chat_id, thread_id, hours * 3600)
     await session.commit()
-    await _sm_show_pick(callback, chat_id, thread_id, role, _, _raw, session)
+    await _sm_show_pick(callback, chat_id, thread_id, _, _raw, session)
     await callback.answer()
 
 
@@ -1991,19 +1973,19 @@ async def _dm_sm_topic_pick_step(
     if ids is None:
         await callback.answer()
         return
-    chat_id, thread_id, role = ids
+    chat_id, thread_id = ids
     delta = -1 if action.startswith("smtvm:") else 1
     cfg = await crud.get_slow_mode(session, chat_id)
     override = await crud.get_slow_mode_topic(session, chat_id, thread_id)
-    current = _sm_hours(cfg, override, role)
+    current = _sm_topic_hours(cfg, override)
     if current <= 0:
         # «∞» has no arithmetic — step to the nearest finite end.
         hours = 1 if delta > 0 else 720
     else:
         hours = max(1, min(720, current + delta))
-    await _sm_set_role(session, chat_id, thread_id, role, hours * 3600)
+    await _sm_set_topic_interval(session, chat_id, thread_id, hours * 3600)
     await session.commit()
-    await _sm_show_pick(callback, chat_id, thread_id, role, _, _raw, session)
+    await _sm_show_pick(callback, chat_id, thread_id, _, _raw, session)
     await callback.answer()
 
 
@@ -2015,15 +1997,15 @@ async def _dm_sm_topic_pick_inherit(
     _raw: Callable[..., str],
     session: AsyncSession,
 ) -> None:
-    """«↩️ Как в чате» for one role: store NULL so the chat value applies."""
+    """«↩️ Как в чате»: store NULL so the chat's rule applies in this topic."""
     ids = _sm_pick_ids(action)
     if ids is None:
         await callback.answer()
         return
-    chat_id, thread_id, role = ids
-    await _sm_set_role(session, chat_id, thread_id, role, None)
+    chat_id, thread_id = ids
+    await _sm_set_topic_interval(session, chat_id, thread_id, None)
     await session.commit()
-    await _sm_show_pick(callback, chat_id, thread_id, role, _, _raw, session)
+    await _sm_show_pick(callback, chat_id, thread_id, _, _raw, session)
     await callback.answer()
 
 
@@ -2723,13 +2705,13 @@ async def dm_sm_topic_id(
 async def dm_sm_topic_params(
     message: types.Message, state: FSMContext, **data: Any
 ) -> None:
-    """Per-topic intervals typed on the topic screen (``dm:smtp:`` step).
+    """Topic's limit typed by hand (``dm:smtp:`` step; the buttons are the norm).
 
-    ``6 3`` / ``вкл 6 3`` pin the topic's own hours (regular + verified
-    sellers, clamped to [1, 720]); a single number keeps the chat value for
-    sellers. «вкл» alone turns the rule on here with the chat intervals,
-    «выкл» switches it off in this topic only and «сброс» drops the override
-    so the topic follows the chat again. Bad input keeps the FSM state.
+    A single number is the limit for EVERYONE in this topic (clamped to
+    [1, 720] hours); «0» / «∞» / «без лимита» stands for «без лимита».
+    «вкл» turns the rule on here with the chat's intervals, «выкл» switches it
+    off in this topic only and «сброс» drops the override so the topic follows
+    the chat again. Bad input keeps the FSM state.
     """
     _ = data["_"]
     _raw = data["_raw"]
@@ -2743,7 +2725,7 @@ async def dm_sm_topic_params(
         await message.answer(_("dm_menu_title"), reply_markup=build_main_menu(_raw))
         return
 
-    cfg = await crud.get_slow_mode(session, chat_id)
+    cfg = await crud.get_slow_mode(session, chat_id)  # for the redraw below
     tokens = (message.text or "").strip().lower().split()
 
     async def redraw(bad: bool = False) -> None:
@@ -2791,28 +2773,26 @@ async def dm_sm_topic_params(
             await session.commit()
             await redraw()
             return
-        numbers = args
-    elif head.isdigit():
-        numbers = tokens
+        rest = args
+    else:
+        rest = tokens
+
+    # Одно число = лимит для всех: «6», «6ч», «6 h»; «0»/«∞»/«без лимита» — ∞.
+    units = ("ч", "ч.", "h", "час", "часа", "часов", "hour", "hours")
+    unlimited = ("0", "∞", "inf", "unlimited", "безлимита", "без лимита", "бесконечно")
+    number = re.compile(r"(\d+)\s*(?:ч|h|час|часа|часов|hour|hours)?\.?")
+    stripped = " ".join(token for token in rest if token not in units)
+    match = number.fullmatch(stripped)
+    if stripped in unlimited:
+        seconds = 0
+    elif match is not None:
+        seconds = max(1, min(720, int(match.group(1)))) * 3600
     else:
         await redraw(bad=True)
         return
-    if len(numbers) > 2 or any(not number.isdigit() for number in numbers):
-        await redraw(bad=True)
-        return
 
-    def hours(value: str) -> int:
-        return max(1, min(720, int(value))) * 3600
-
-    base_wl = cfg.wl_seconds if cfg is not None else 10800
-    await crud.set_slow_mode_topic(
-        session,
-        chat_id,
-        thread_id,
-        enabled=True,
-        regular_seconds=hours(numbers[0]),
-        wl_seconds=hours(numbers[1]) if len(numbers) > 1 else base_wl,
-    )
+    await _sm_set_topic_interval(session, chat_id, thread_id, seconds)
+    await crud.set_slow_mode_topic(session, chat_id, thread_id, enabled=True)
     await session.commit()
     await redraw()
 
