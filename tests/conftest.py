@@ -52,10 +52,6 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "triggers_enabled": False,
     "stats_enabled": True,
     # Slow-mode violations (chat-level punishment settings).
-    "sm_warn_text": None,
-    "sm_warn_limit": 0,
-    "sm_punish_action": "mute",
-    "sm_punish_duration": 3600,
 }
 
 BOT_ID = 42

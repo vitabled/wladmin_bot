@@ -140,8 +140,17 @@ def _config(enabled=True, regular=21600, wl=10800, topic_ids=None) -> SimpleName
     )
 
 
-def _override(enabled=True, regular=None, wl=None) -> SimpleNamespace:
-    return SimpleNamespace(enabled=enabled, regular_seconds=regular, wl_seconds=wl)
+def _override(enabled=True, regular=None, wl=None, **punish) -> SimpleNamespace:
+    """A SlowModeTopic-shaped row: interval override + its own punishment."""
+    return SimpleNamespace(
+        enabled=enabled,
+        regular_seconds=regular,
+        wl_seconds=wl,
+        punish_text=punish.get("text"),
+        punish_limit=punish.get("limit", 0),
+        punish_action=punish.get("action", "mute"),
+        punish_duration=punish.get("duration", 3600),
+    )
 
 
 def _patch_crud(monkeypatch, config, topic_override=None, scam_entry=None):
@@ -405,7 +414,6 @@ async def test_topics_list_has_params_button_per_topic(base_data, fsm, monkeypat
         [f"dm:smbdone:{GROUP_CHAT_ID}"],
         [f"dm:smrefresh:{GROUP_CHAT_ID}"],
         [f"dm:smadd:{GROUP_CHAT_ID}"],
-        [f"dm:smpun:{GROUP_CHAT_ID}"],
         [f"dm:g:{GROUP_CHAT_ID}", "dm:menu"],
     ]
     kb = cb.message.edit_text.await_args.kwargs["reply_markup"]
@@ -464,7 +472,6 @@ async def test_topics_list_empty_shows_hint_screen(base_data, fsm, monkeypatch):
         f"dm:smc:{GROUP_CHAT_ID}",  # the chat-wide rule is reachable here too
         f"dm:smball:{GROUP_CHAT_ID}",
         f"dm:smadd:{GROUP_CHAT_ID}",
-        f"dm:smpun:{GROUP_CHAT_ID}",
         f"dm:smback:{GROUP_CHAT_ID}",
     ]
 
@@ -679,6 +686,7 @@ async def test_topic_pick_opens_grid_and_marks_current(base_data, fsm, monkeypat
         [f"dm:smtvs:{GROUP_CHAT_ID}:3:0"],
         [f"dm:smtvm:{GROUP_CHAT_ID}:3", f"dm:smtvp:{GROUP_CHAT_ID}:3"],
         [f"dm:smtp:{GROUP_CHAT_ID}:3"],
+        [f"dm:smw:{GROUP_CHAT_ID}:3"],  # punishment of THIS topic
         [f"dm:smtl:{GROUP_CHAT_ID}", "dm:menu"],
     ]
     cb.answer.assert_awaited_once()
@@ -1114,50 +1122,72 @@ async def test_params_without_state_data_returns_to_menu(base_data, fsm, monkeyp
 
 
 # --------------------------------------------------------------------------- #
-# Punishment for violations (chat_settings.sm_*)
+# Punishment for violations (slow_mode_topics.punish_*)
 # --------------------------------------------------------------------------- #
-def _violation_data(base_data, **over) -> dict:
-    """Pipeline data for a blocked message, with the punishment settings set."""
-    return {
-        **base_data,
-        "settings": {**base_data["settings"], **over},
-        "is_admin": False,
-        "is_owner": False,
-    }
+def _violation_data(base_data) -> dict:
+    """Pipeline data for a blocked message from an ordinary member."""
+    return {**base_data, "is_admin": False, "is_owner": False}
 
 
-def _blocked(monkeypatch, base_data, *, limit=3, incr=1, **over) -> dict:
-    """Patch crud for a blocked message and set the violation counter."""
-    _patch_crud(monkeypatch, _config(regular=60, wl=30))
+def _blocked(monkeypatch, base_data, *, limit=3, incr=1, config=None, **punish):
+    """Patch crud for a blocked message in a topic that carries a punishment."""
+    override = _override(enabled=True, regular=60, limit=limit, **punish)
+    _patch_crud(
+        monkeypatch,
+        config if config is not None else _config(regular=60, wl=30),
+        topic_override=override,
+    )
     redis = base_data["redis"]
     redis.get.return_value = str(int(time.time()) - 10)  # posted 10s ago
     redis.incr.return_value = incr
-    return _violation_data(base_data, sm_warn_limit=limit, **over)
-
-
-def _settings_obj(base_data, **over):
-    """A ChatSettings-shaped namespace for ``crud.settings_to_dict``."""
-    return SimpleNamespace(**{**base_data["settings"], **over})
-
-
-def _patch_settings(monkeypatch, base_data, **over):
-    obj = _settings_obj(base_data, **over)
-    update = AsyncMock()
-    monkeypatch.setattr(crud, "get_or_create_settings", AsyncMock(return_value=obj))
-    monkeypatch.setattr(crud, "update_settings", update)
-    return obj, update
+    return _violation_data(base_data)
 
 
 def _kb_texts(cb) -> list[str]:
     kb = cb.message.edit_text.await_args.kwargs["reply_markup"]
-    return [btn.text for row in kb.inline_keyboard for btn in row]
+    return [btn.text for btn in rows_flat(kb)]
+
+
+def rows_flat(kb):
+    """Inline buttons of a markup, flattened (row order kept)."""
+    return [btn for row in kb.inline_keyboard for btn in row]
+
+
+def _patch_screen(
+    monkeypatch,
+    base_data,
+    row=None,
+    *,
+    topic="Задачи",
+    thread_id=3,
+    topics=None,
+):
+    """Patch crud for the topic's punishment screen and its writes."""
+    setter = AsyncMock(return_value=row)
+    monkeypatch.setattr(crud, "get_slow_mode_topic", AsyncMock(return_value=row))
+    monkeypatch.setattr(crud, "set_slow_mode_topic", setter)
+    monkeypatch.setattr(
+        crud,
+        "list_topics",
+        AsyncMock(
+            return_value=(
+                [_topic(thread_id, title=topic)] if topics is None else topics
+            )
+        ),
+    )
+    return setter
+
+
+def _topic_row(**punish):
+    """A SlowModeTopic-shaped row holding this topic's punishment."""
+    return _override(enabled=True, regular=3600, **punish)
 
 
 # --- enforcement ----------------------------------------------------------- #
 
 
 async def test_custom_warn_text_goes_to_the_violator(monkeypatch, base_data):
-    data = _blocked(monkeypatch, base_data, sm_warn_text="🚫 Не так быстро!")
+    data = _blocked(monkeypatch, base_data, text="🚫 Не так быстро!")
     bot, msg = make_bot(), _group_message(topic=3)
     assert await check_and_record(bot, msg, data) is False
     msg.reply.assert_awaited_once_with("🚫 Не так быстро!", parse_mode="HTML")
@@ -1165,7 +1195,7 @@ async def test_custom_warn_text_goes_to_the_violator(monkeypatch, base_data):
 
 async def test_bad_html_in_the_warn_text_falls_back_to_plain(monkeypatch, base_data):
     """A tag Telegram rejects must not swallow the warning."""
-    data = _blocked(monkeypatch, base_data, sm_warn_text="<b>oops")
+    data = _blocked(monkeypatch, base_data, text="<b>oops")
     bot, msg = make_bot(), _group_message(topic=3)
     msg.reply.side_effect = [RuntimeError("bad entities"), None]
     assert await check_and_record(bot, msg, data) is False
@@ -1199,16 +1229,51 @@ async def test_zero_limit_never_counts_a_violation(monkeypatch, base_data):
     base_data["redis"].incr.assert_not_awaited()
 
 
+async def test_topic_without_a_row_of_its_own_never_punishes(monkeypatch, base_data):
+    """The chat-wide rule warns, but only a topic's own rule may punish."""
+    _patch_crud(monkeypatch, _config(regular=60, wl=30), topic_override=None)
+    redis = base_data["redis"]
+    redis.get.return_value = str(int(time.time()) - 10)
+    bot, msg = make_bot(), _group_message(topic=3)
+
+    assert await check_and_record(bot, msg, _violation_data(base_data)) is False
+
+    redis.incr.assert_not_awaited()
+    bot.restrict_chat_member.assert_not_awaited()
+
+
+async def test_one_topics_punishment_never_leaks_into_another(monkeypatch, base_data):
+    """Topic 3 bans, topic 6 (inheriting) only warns — same chat, same minute."""
+    rows = {
+        3: _override(enabled=True, regular=60, limit=1, action="ban", duration=None),
+        6: None,
+    }
+
+    async def _row(_session, _chat_id, thread_id):
+        return rows.get(thread_id)
+
+    monkeypatch.setattr(crud, "get_slow_mode_topic", _row)
+    monkeypatch.setattr(crud, "get_slow_mode", AsyncMock(return_value=_config(60, 30)))
+    monkeypatch.setattr(crud, "get_scam_entry", AsyncMock(return_value=None))
+    monkeypatch.setattr(crud, "add_mod_log", AsyncMock())
+    redis = base_data["redis"]
+    redis.get.return_value = str(int(time.time()) - 10)
+    redis.incr.return_value = 1
+    data = _violation_data(base_data)
+
+    bot = make_bot()
+    assert await check_and_record(bot, _group_message(topic=6), data) is False
+    bot.ban_chat_member.assert_not_awaited()  # no row → warned only
+
+    assert await check_and_record(bot, _group_message(topic=3), data) is False
+    bot.ban_chat_member.assert_awaited_once()  # …its own row bans
+
+
 async def test_reaching_the_limit_mutes_and_announces(monkeypatch, base_data):
     add_mod_log = AsyncMock()
     monkeypatch.setattr(crud, "add_mod_log", add_mod_log)
     data = _blocked(
-        monkeypatch,
-        base_data,
-        limit=3,
-        incr=3,
-        sm_punish_action="mute",
-        sm_punish_duration=86400,
+        monkeypatch, base_data, limit=3, incr=3, action="mute", duration=86400
     )
     bot, msg = make_bot(), _group_message(topic=3)
     assert await check_and_record(bot, msg, data) is False
@@ -1228,12 +1293,7 @@ async def test_reaching_the_limit_mutes_and_announces(monkeypatch, base_data):
 async def test_ban_action_is_used_when_configured(monkeypatch, base_data):
     monkeypatch.setattr(crud, "add_mod_log", AsyncMock())
     data = _blocked(
-        monkeypatch,
-        base_data,
-        limit=1,
-        incr=1,
-        sm_punish_action="ban",
-        sm_punish_duration=None,
+        monkeypatch, base_data, limit=1, incr=1, action="ban", duration=None
     )
     bot, msg = make_bot(), _group_message(topic=3)
     await check_and_record(bot, msg, data)
@@ -1244,12 +1304,7 @@ async def test_ban_action_is_used_when_configured(monkeypatch, base_data):
 async def test_kick_action_ban_then_unban(monkeypatch, base_data):
     monkeypatch.setattr(crud, "add_mod_log", AsyncMock())
     data = _blocked(
-        monkeypatch,
-        base_data,
-        limit=1,
-        incr=1,
-        sm_punish_action="kick",
-        sm_punish_duration=604800,
+        monkeypatch, base_data, limit=1, incr=1, action="kick", duration=604800
     )
     bot, msg = make_bot(), _group_message(topic=3)
     await check_and_record(bot, msg, data)
@@ -1271,42 +1326,45 @@ async def test_failed_punishment_is_not_announced(monkeypatch, base_data):
 
 
 async def test_punish_screen_shows_all_four_settings(base_data, fsm, monkeypatch):
-    _patch_settings(
-        monkeypatch,
-        base_data,
-        sm_warn_limit=5,
-        sm_warn_text="Не так быстро",
-        sm_punish_action="ban",
-        sm_punish_duration=86400,
-    )
+    row = _topic_row(limit=5, text="Не так быстро", action="ban", duration=86400)
+    _patch_screen(monkeypatch, base_data, row)
     calls = _capturing_translator(base_data)
-    cb = _cb(f"dm:smpun:{GROUP_CHAT_ID}")
+    cb = _cb(f"dm:smw:{GROUP_CHAT_ID}:3")
     await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
 
     assert next(kw for key, kw in calls if key == "dm_sm_punish_count_line") == {
         "count": 5
     }
+    assert next(kw for key, kw in calls if key == "dm_sm_punish_title") == {
+        "topic": "Задачи"
+    }
     text = cb.message.edit_text.await_args.args[0]
     assert text.startswith("dm_sm_punish_title")  # screen body is rendered
 
     rows = _kb_rows(cb)
-    assert [f"dm:smpunt:{GROUP_CHAT_ID}"] in rows
-    assert [f"dm:smpunc:{GROUP_CHAT_ID}:{n}" for n in (1, 2, 3, 5, 10)] in rows
-    assert [f"dm:smpunc:{GROUP_CHAT_ID}:0"] in rows
+    assert [f"dm:smwt:{GROUP_CHAT_ID}:3"] in rows
+    assert [f"dm:smwc:{GROUP_CHAT_ID}:3:{n}" for n in (1, 2, 3, 5, 10)] in rows
+    assert [f"dm:smwc:{GROUP_CHAT_ID}:3:0"] in rows
     assert [
-        f"dm:smpuna:{GROUP_CHAT_ID}:mute",
-        f"dm:smpuna:{GROUP_CHAT_ID}:kick",
-        f"dm:smpuna:{GROUP_CHAT_ID}:ban",
+        f"dm:smwa:{GROUP_CHAT_ID}:3:mute",
+        f"dm:smwa:{GROUP_CHAT_ID}:3:kick",
+        f"dm:smwa:{GROUP_CHAT_ID}:3:ban",
     ] in rows
     assert [
-        f"dm:smpund:{GROUP_CHAT_ID}:3600",
-        f"dm:smpund:{GROUP_CHAT_ID}:86400",
-        f"dm:smpund:{GROUP_CHAT_ID}:604800",
-        f"dm:smpund:{GROUP_CHAT_ID}:0",
+        f"dm:smwd:{GROUP_CHAT_ID}:3:3600",
+        f"dm:smwd:{GROUP_CHAT_ID}:3:86400",
+        f"dm:smwd:{GROUP_CHAT_ID}:3:604800",
+        f"dm:smwd:{GROUP_CHAT_ID}:3:0",
     ] in rows
-    assert [f"dm:smtl:{GROUP_CHAT_ID}", "dm:menu"] in rows  # back to the topics
+    # «⬅️» goes back to THIS topic's grid, and the list/home stay one tap away
+    assert [f"dm:smt:{GROUP_CHAT_ID}:3"] in rows
+    assert [f"dm:smtl:{GROUP_CHAT_ID}", "dm:menu"] in rows
 
-    marked = [text for text in _kb_texts(cb) if text.startswith("✅ ")]
+    marked = [
+        btn.text
+        for btn in rows_flat(cb.message.edit_text.await_args.kwargs["reply_markup"])
+        if btn.text.startswith("✅ ")
+    ]
     assert marked == ["✅ 5", "✅ dm_sm_punish_action_ban", "✅ dm_sm_punish_dur_days"]
 
     # the screen is part of the slow-mode flow: the FSM is seeded for «⬅️»
@@ -1314,13 +1372,19 @@ async def test_punish_screen_shows_all_four_settings(base_data, fsm, monkeypatch
 
 
 async def test_punish_screen_marks_forever_and_off(base_data, fsm, monkeypatch):
-    _patch_settings(monkeypatch, base_data, sm_warn_limit=0, sm_punish_duration=None)
+    _patch_screen(
+        monkeypatch, base_data, _topic_row(limit=0, duration=None, action="mute")
+    )
     calls = _capturing_translator(base_data)
-    cb = _cb(f"dm:smpun:{GROUP_CHAT_ID}")
+    cb = _cb(f"dm:smw:{GROUP_CHAT_ID}:3")
     await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
 
     assert any(key == "dm_sm_punish_count_off_line" for key, _kw in calls)
-    marked = [text for text in _kb_texts(cb) if text.startswith("✅ ")]
+    marked = [
+        btn.text
+        for btn in rows_flat(cb.message.edit_text.await_args.kwargs["reply_markup"])
+        if btn.text.startswith("✅ ")
+    ]
     assert marked == [
         "✅ dm_sm_punish_count_off",
         "✅ dm_sm_punish_action_mute",
@@ -1328,115 +1392,180 @@ async def test_punish_screen_marks_forever_and_off(base_data, fsm, monkeypatch):
     ]
 
 
-async def test_punish_count_button_writes_and_redraws(base_data, fsm, monkeypatch):
-    _obj, update = _patch_settings(monkeypatch, base_data)
-    cb = _cb(f"dm:smpunc:{GROUP_CHAT_ID}:5")
+async def test_punish_screen_without_a_topic_limit_offers_to_set_one(
+    base_data, fsm, monkeypatch
+):
+    """No row = nothing to punish: the screen says so and points at the grid."""
+    _patch_screen(monkeypatch, base_data, None)
+    calls = _capturing_translator(base_data)
+    cb = _cb(f"dm:smw:{GROUP_CHAT_ID}:3")
     await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
 
-    update.assert_awaited_once_with(
-        base_data["session"], GROUP_CHAT_ID, sm_warn_limit=5
+    assert cb.message.edit_text.await_args.args[0] == "dm_sm_punish_no_limit"
+    assert next(kw for key, kw in calls if key == "dm_sm_punish_no_limit") == {
+        "topic": "Задачи"
+    }
+    rows = _kb_rows(cb)
+    assert [f"dm:smt:{GROUP_CHAT_ID}:3"] in rows  # «⚙️ Сначала задать лимит ветки»
+    assert [f"dm:smtl:{GROUP_CHAT_ID}", "dm:menu"] in rows
+
+
+async def test_topic_grid_carries_the_punishment_button(base_data, fsm, monkeypatch):
+    """The entry lives in the topic's own settings, not on the chat-wide list."""
+    monkeypatch.setattr(
+        crud, "get_slow_mode_topic", AsyncMock(return_value=_topic_row())
     )
-    base_data["redis"].invalidate_settings.assert_awaited_once_with(GROUP_CHAT_ID)
+    cb = _cb(f"dm:smt:{GROUP_CHAT_ID}:3")
+    await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
+
+    callbacks = _all_callbacks(cb)
+    assert f"dm:smw:{GROUP_CHAT_ID}:3" in callbacks
+
+
+async def test_topic_list_has_no_chat_wide_punishment_button(
+    base_data, fsm, monkeypatch
+):
+    _patch_crud(monkeypatch, _config(), topic_override=None)
+    monkeypatch.setattr(
+        crud, "list_topics", AsyncMock(return_value=[_topic(3, title="Задачи")])
+    )
+    monkeypatch.setattr(
+        crud, "list_slow_mode_topics", AsyncMock(return_value={3: _topic_row()})
+    )
+    cb = _cb(f"dm:smtl:{GROUP_CHAT_ID}")
+    await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
+
+    assert not [
+        data for data in _all_callbacks(cb) if data.startswith("dm:smpun:")
+    ]  # the old chat-wide entry is gone for good
+    assert not [data for data in _all_callbacks(cb) if data.startswith("dm:smw:")]
+    assert f"dm:smt:{GROUP_CHAT_ID}:3" in _all_callbacks(cb)  # per-topic ⚙️ stays
+
+
+async def test_punish_count_button_writes_and_redraws(base_data, fsm, monkeypatch):
+    setter = _patch_screen(monkeypatch, base_data, _topic_row())
+    cb = _cb(f"dm:smwc:{GROUP_CHAT_ID}:3:5")
+    await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
+
+    setter.assert_awaited_once_with(
+        base_data["session"], GROUP_CHAT_ID, 3, punish_limit=5
+    )
+    base_data["session"].commit.assert_awaited()
     cb.answer.assert_awaited_once()
     assert cb.message.edit_text.await_args.args[0].startswith("dm_sm_punish_title")
 
 
 async def test_punish_count_zero_means_never(base_data, fsm, monkeypatch):
-    _obj, update = _patch_settings(monkeypatch, base_data)
-    cb = _cb(f"dm:smpunc:{GROUP_CHAT_ID}:0")
+    setter = _patch_screen(monkeypatch, base_data, _topic_row(limit=5))
+    cb = _cb(f"dm:smwc:{GROUP_CHAT_ID}:3:0")
     await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
-    update.assert_awaited_once_with(
-        base_data["session"], GROUP_CHAT_ID, sm_warn_limit=0
+    setter.assert_awaited_once_with(
+        base_data["session"], GROUP_CHAT_ID, 3, punish_limit=0
     )
 
 
 async def test_punish_action_button_writes(base_data, fsm, monkeypatch):
-    _obj, update = _patch_settings(monkeypatch, base_data)
-    cb = _cb(f"dm:smpuna:{GROUP_CHAT_ID}:ban")
+    setter = _patch_screen(monkeypatch, base_data, _topic_row())
+    cb = _cb(f"dm:smwa:{GROUP_CHAT_ID}:3:ban")
     await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
-    update.assert_awaited_once_with(
-        base_data["session"], GROUP_CHAT_ID, sm_punish_action="ban"
+    setter.assert_awaited_once_with(
+        base_data["session"], GROUP_CHAT_ID, 3, punish_action="ban"
     )
 
 
-async def test_punish_duration_button_writes_seconds(base_data, fsm, monkeypatch):
-    _obj, update = _patch_settings(monkeypatch, base_data)
-    cb = _cb(f"dm:smpund:{GROUP_CHAT_ID}:604800")
+async def test_punish_action_button_refuses_junk(base_data, fsm, monkeypatch):
+    setter = _patch_screen(monkeypatch, base_data, _topic_row())
+    cb = _cb(f"dm:smwa:{GROUP_CHAT_ID}:3:nuke")
     await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
-    update.assert_awaited_once_with(
-        base_data["session"], GROUP_CHAT_ID, sm_punish_duration=604800
+    setter.assert_not_awaited()  # nothing but mute/kick/ban ever reaches the DB
+
+
+async def test_punish_duration_button_writes_seconds(base_data, fsm, monkeypatch):
+    setter = _patch_screen(monkeypatch, base_data, _topic_row())
+    cb = _cb(f"dm:smwd:{GROUP_CHAT_ID}:3:604800")
+    await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
+    setter.assert_awaited_once_with(
+        base_data["session"], GROUP_CHAT_ID, 3, punish_duration=604800
     )
 
 
 async def test_punish_duration_forever_stores_none(base_data, fsm, monkeypatch):
-    _obj, update = _patch_settings(monkeypatch, base_data)
-    cb = _cb(f"dm:smpund:{GROUP_CHAT_ID}:0")
+    setter = _patch_screen(monkeypatch, base_data, _topic_row())
+    cb = _cb(f"dm:smwd:{GROUP_CHAT_ID}:3:0")
     await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
-    update.assert_awaited_once_with(
-        base_data["session"], GROUP_CHAT_ID, sm_punish_duration=None
+    setter.assert_awaited_once_with(
+        base_data["session"], GROUP_CHAT_ID, 3, punish_duration=None
     )
 
 
 async def test_punish_text_button_asks_for_the_text(base_data, fsm, monkeypatch):
-    _patch_settings(monkeypatch, base_data)
-    cb = _cb(f"dm:smpunt:{GROUP_CHAT_ID}")
+    _patch_screen(monkeypatch, base_data, _topic_row())
+    cb = _cb(f"dm:smwt:{GROUP_CHAT_ID}:3")
     await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
 
     assert await fsm.get_state() == dm_menu.DmSlowMode.awaiting_sm_punish_text
+    assert (await fsm.get_data())["thread_id"] == 3  # the step knows its topic
     assert cb.message.edit_text.await_args.args[0] == "dm_sm_punish_text_prompt"
     assert _all_callbacks(cb) == [
-        f"dm:smpun:{GROUP_CHAT_ID}",  # «⬅️ Назад к наказанию»
+        f"dm:smt:{GROUP_CHAT_ID}:3",  # «⬅️ К настройкам ветки»
         f"dm:smtl:{GROUP_CHAT_ID}",
         "dm:menu",
     ]
 
 
 async def test_typed_punish_text_is_saved(base_data, fsm, monkeypatch):
-    monkeypatch.setattr(
-        crud,
-        "get_or_create_settings",
-        AsyncMock(return_value=SimpleNamespace(**base_data["settings"])),
-    )
-    update = AsyncMock()
-    monkeypatch.setattr(crud, "update_settings", update)
+    setter = _patch_screen(monkeypatch, base_data, _topic_row())
     await fsm.set_state(dm_menu.DmSlowMode.awaiting_sm_punish_text)
-    await fsm.update_data(chat_id=GROUP_CHAT_ID)
+    await fsm.update_data(chat_id=GROUP_CHAT_ID, thread_id=3)
 
     msg = make_message(text="🚫 Не так быстро!", chat=_dm_chat())
     await dm_menu.dm_sm_punish_text(msg, state=fsm, **base_data)
 
-    update.assert_awaited_once_with(
-        base_data["session"], GROUP_CHAT_ID, sm_warn_text="🚫 Не так быстро!"
+    setter.assert_awaited_once_with(
+        base_data["session"], GROUP_CHAT_ID, 3, punish_text="🚫 Не так быстро!"
     )
-    base_data["redis"].invalidate_settings.assert_awaited_once_with(GROUP_CHAT_ID)
     assert await fsm.get_state() is None  # the step is finished
-    # …and the punishment screen comes back
+    # …and the topic's punishment screen comes back
     assert msg.answer.await_args.args[0].startswith("dm_sm_punish_title")
 
 
 async def test_typed_dash_restores_the_default_text(base_data, fsm, monkeypatch):
-    _patch_settings(monkeypatch, base_data, sm_warn_text="старое")
+    setter = _patch_screen(monkeypatch, base_data, _topic_row(text="старое"))
     await fsm.set_state(dm_menu.DmSlowMode.awaiting_sm_punish_text)
-    await fsm.update_data(chat_id=GROUP_CHAT_ID)
+    await fsm.update_data(chat_id=GROUP_CHAT_ID, thread_id=3)
 
     msg = make_message(text="-", chat=_dm_chat())
     await dm_menu.dm_sm_punish_text(msg, state=fsm, **base_data)
-    crud.update_settings.assert_awaited_once_with(
-        base_data["session"], GROUP_CHAT_ID, sm_warn_text=None
+    setter.assert_awaited_once_with(
+        base_data["session"], GROUP_CHAT_ID, 3, punish_text=None
     )
 
 
 async def test_typed_punish_text_too_long_is_refused(base_data, fsm, monkeypatch):
-    _obj, update = _patch_settings(monkeypatch, base_data)
+    setter = _patch_screen(monkeypatch, base_data, _topic_row())
     await fsm.set_state(dm_menu.DmSlowMode.awaiting_sm_punish_text)
-    await fsm.update_data(chat_id=GROUP_CHAT_ID)
+    await fsm.update_data(chat_id=GROUP_CHAT_ID, thread_id=3)
 
     msg = make_message(text="х" * 1025, chat=_dm_chat())
     await dm_menu.dm_sm_punish_text(msg, state=fsm, **base_data)
 
-    update.assert_not_awaited()
+    setter.assert_not_awaited()
     assert msg.answer.await_args.args[0] == "dm_sm_punish_text_long"
     assert await fsm.get_state() == dm_menu.DmSlowMode.awaiting_sm_punish_text
+
+
+async def test_typed_punish_text_without_a_topic_returns_to_the_menu(
+    base_data, fsm, monkeypatch
+):
+    setter = _patch_screen(monkeypatch, base_data, _topic_row())
+    await fsm.set_state(dm_menu.DmSlowMode.awaiting_sm_punish_text)
+    await fsm.update_data(chat_id=GROUP_CHAT_ID)  # an old prompt, no topic
+
+    msg = make_message(text="привет", chat=_dm_chat())
+    await dm_menu.dm_sm_punish_text(msg, state=fsm, **base_data)
+
+    setter.assert_not_awaited()
+    assert msg.answer.await_args.args[0] == "dm_menu_title"
 
 
 # --- labels ---------------------------------------------------------------- #

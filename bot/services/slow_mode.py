@@ -23,11 +23,12 @@ row, so admins keep one global default without having to pre-enable it). A row
 turned on with no own value falls back to the chat's values, or to the 6 h /
 3 h defaults when the chat has no row at all.
 
-Violations escalate: a blocked message is deleted and its author warned, and
-once ``chat_settings.sm_warn_limit`` messages have been blocked in the same
-window the configured punishment (mute/kick/ban for ``sm_punish_duration``) is
-applied. The warn text is ``chat_settings.sm_warn_text`` when the owner set one,
-otherwise the built-in one.
+Violations escalate per topic: a blocked message is deleted and its author
+warned, and once ``slow_mode_topics.punish_limit`` messages have been blocked in
+the same window the topic's punishment (mute/kick/ban for ``punish_duration``) is
+applied. The warn text is that row's ``punish_text`` when the owner set one,
+otherwise the built-in one. A topic WITHOUT a row of its own is only warned —
+there is no limit of its own to punish, so the chat-wide rule never punishes.
 
 Fail-open by design: non-group chats, bots/anonymous senders, disabled config
 and non-positive intervals are always allowed. Callers must not let slow mode
@@ -146,8 +147,8 @@ async def check_and_record(bot, message, data: dict) -> bool:
                 await bot.delete_message(message.chat.id, message.message_id)
             except Exception:
                 pass
-            await _warn_author(bot, message, data, remaining)
-            await _count_violation(bot, message, data, interval, topic, user)
+            await _warn_author(bot, message, data, remaining, override)
+            await _count_violation(bot, message, data, interval, topic, user, override)
             return False
 
     # (h) Allowed: record the timestamp, expire just past the interval.
@@ -155,15 +156,15 @@ async def check_and_record(bot, message, data: dict) -> bool:
     return True
 
 
-async def _warn_author(bot, message, data: dict, remaining: int) -> None:
-    """Reply to a blocked message with the owner's text, or the built-in one.
+async def _warn_author(bot, message, data: dict, remaining: int, override) -> None:
+    """Reply to a blocked message with the topic's text, or the built-in one.
 
-    The custom text goes out with ``parse_mode="HTML"`` (the same trust model as
+    The text comes from the topic row that carries the limit (``punish_text``);
+    it goes out with ``parse_mode="HTML"`` (the same trust model as
     ``welcome_text``); if Telegram rejects the markup the message is retried as
     plain text so the author always sees something.
     """
-    settings = data.get("settings") or {}
-    text = (settings.get("sm_warn_text") or "").strip()
+    text = (getattr(override, "punish_text", None) or "").strip()
     try:
         if text:
             try:
@@ -179,16 +180,20 @@ async def _warn_author(bot, message, data: dict, remaining: int) -> None:
 
 
 async def _count_violation(
-    bot, message, data: dict, interval: int, topic: int, user
+    bot, message, data: dict, interval: int, topic: int, user, override
 ) -> None:
     """Count a blocked message; punish the author once the limit is reached.
 
-    Violations are counted in the same window as the slowdown itself (the
-    counter expires with the timestamp key), so an occasional offender starts
-    clean after the interval. ``sm_warn_limit <= 0`` means «never punish».
+    Both the limit and the punishment come from the topic's own row: a topic
+    without one has no rule to punish, so it only ever sees the warning (and a
+    kick/ban meant for another topic can never leak into it). Violations are
+    counted in the same window as the slowdown itself (the counter expires with
+    the timestamp key), so an occasional offender starts clean after the
+    interval. ``punish_limit <= 0`` means «never punish».
     """
-    settings = data.get("settings") or {}
-    limit = _as_int(settings.get("sm_warn_limit"), 0)
+    if override is None:
+        return
+    limit = _as_int(getattr(override, "punish_limit", 0), 0)
     if limit <= 0:
         return
     redis = data.get("redis")
@@ -207,16 +212,15 @@ async def _count_violation(
     # Limit reached: punish once and start the count over, so the next spree
     # has to earn the punishment again.
     await redis.delete(key)
-    await _punish(bot, message, data, user)
+    await _punish(bot, message, data, user, override)
 
 
-async def _punish(bot, message, data: dict, user) -> None:
-    """Apply the configured punishment and announce it in the chat."""
-    settings = data.get("settings") or {}
-    action = str(settings.get("sm_punish_action") or "mute").lower()
+async def _punish(bot, message, data: dict, user, override) -> None:
+    """Apply the topic's punishment and announce it in the chat."""
+    action = str(getattr(override, "punish_action", None) or "mute").lower()
     if action not in PUNISH_ACTIONS:
         action = "mute"
-    duration = _as_int(settings.get("sm_punish_duration"), None) or None
+    duration = _as_int(getattr(override, "punish_duration", None), None) or None
     session = data.get("session")
     chat_id = message.chat.id
     # Imported here: ``bot.handlers`` pulls in the routers, which import this

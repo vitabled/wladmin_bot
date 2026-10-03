@@ -146,7 +146,8 @@ class DmSlowMode(StatesGroup):
     ``awaiting_topic_id`` accepts a hand-typed thread id;
     ``awaiting_topic_params`` parses per-topic intervals
     (``6 3`` | ``вкл 6 3`` | ``выкл`` | ``сброс``); and
-    ``awaiting_sm_punish_text`` takes the warning text shown to violators.
+    ``awaiting_sm_punish_text`` takes the warning text one topic shows to its
+    own violators (the state carries chat_id + thread_id).
     """
 
     awaiting_config = State()
@@ -638,7 +639,6 @@ def _build_sm_topics_kb(
             )
         ]
     )
-    rows.append([_sm_punish_row(_raw, chat_id)])
     rows.append(
         [
             types.InlineKeyboardButton(
@@ -752,7 +752,7 @@ def _build_sm_topic_pick_kb(
     current: int,
     own: bool,
 ) -> types.InlineKeyboardMarkup:
-    """Hour grid for a topic: presets, ±1 ч, reset, manual, nav.
+    """Hour grid for a topic: presets, ±1 ч, reset, manual, punishment, nav.
 
     The matching preset carries «✅», so the screen stays stateless — every
     press redraws it from the database. «±1 ч» is hidden for «∞» (0); «↩️ Как
@@ -760,6 +760,10 @@ def _build_sm_topic_pick_kb(
     one tap away for unusual values. There is no «⛔ Выключить здесь» button:
     a topic either has its own limit («↩️ Как в чате» drops it) or follows the
     chat — switching a single topic off is not a setting the owner wants.
+
+    «⚠️ Наказание за нарушения» sits under the manual entry: the punishment for
+    violating the topic's rule is part of THIS topic's settings, never a
+    chat-wide switch that could surprise another group.
     """
     rows: list[list[types.InlineKeyboardButton]] = []
     row: list[types.InlineKeyboardButton] = []
@@ -816,77 +820,83 @@ def _build_sm_topic_pick_kb(
             )
         ]
     )
+    rows.append(
+        [
+            types.InlineKeyboardButton(
+                text=_raw("dm_sm_punish_btn"),
+                callback_data=f"{_PREFIX}:smw:{chat_id}:{thread_id}",
+            )
+        ]
+    )
     rows.extend(_build_sm_topic_kb(_raw, chat_id, thread_id).inline_keyboard)
     return types.InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-# --- Punishment for slow-mode violations (dm:smpun:*) --------------------- #
+# --- Punishment for slow-mode violations (per topic, dm:smw:*) ------------- #
 
 
-def _sm_punish_limit(settings: dict[str, Any]) -> int:
+def _sm_punish_limit(row: Any) -> int:
     """Warnings before the punishment; ``0`` (or junk) means «never punish»."""
     try:
-        return max(0, int(settings.get("sm_warn_limit") or 0))
+        return max(0, int(getattr(row, "punish_limit", 0) or 0))
     except (TypeError, ValueError):
         return 0
 
 
-def _sm_punish_action(settings: dict[str, Any]) -> str:
+def _sm_punish_action(row: Any) -> str:
     """Configured action, falling back to «mute» for anything unexpected."""
-    action = str(settings.get("sm_punish_action") or "mute").lower()
+    action = str(getattr(row, "punish_action", None) or "mute").lower()
     return action if action in PUNISH_ACTIONS else "mute"
 
 
-def _sm_punish_duration(settings: dict[str, Any]) -> int | None:
+def _sm_punish_duration(row: Any) -> int | None:
     """Configured duration in seconds; ``None`` = «forever»."""
     try:
-        return int(settings.get("sm_punish_duration")) or None
+        return int(getattr(row, "punish_duration", None)) or None
     except (TypeError, ValueError):
         return None
 
 
-def _sm_punish_text(_: Callable[..., str], settings: dict[str, Any]) -> str:
-    """Body of the punishment screen: the current value of all four settings.
+def _sm_punish_text(_: Callable[..., str], row: Any, topic: str) -> str:
+    """Body of one topic's punishment screen: the value of all four settings.
 
     Sent with ``parse_mode="HTML"`` (see ``_edit_or_answer``), so the stored
     warning text is escaped — it is user input, and a stray ``<`` would break
     the whole screen.
     """
-    limit = _sm_punish_limit(settings)
+    limit = _sm_punish_limit(row)
     count_line = (
         _("dm_sm_punish_count_off_line")
         if limit <= 0
         else _("dm_sm_punish_count_line", count=limit)
     )
-    custom = (settings.get("sm_warn_text") or "").strip()
+    custom = (getattr(row, "punish_text", None) or "").strip()
     text = escape_html(custom[:120]) if custom else _("dm_sm_punish_text_default")
-    action = punish_action_label(
-        _, _sm_punish_action(settings), _sm_punish_duration(settings)
-    )
+    action = punish_action_label(_, _sm_punish_action(row), _sm_punish_duration(row))
     return (
-        f"{_('dm_sm_punish_title')}\n\n"
+        f"{_('dm_sm_punish_title', topic=topic)}\n\n"
         f"{_('dm_sm_punish_now', count_line=count_line, action=action, text=text)}\n\n"
         f"{_('dm_sm_punish_hint')}"
     )
 
 
 def _build_sm_punish_kb(
-    _raw: Callable[..., str], chat_id: int, settings: dict[str, Any]
+    _raw: Callable[..., str], chat_id: int, thread_id: int, row: Any
 ) -> types.InlineKeyboardMarkup:
-    """Punishment screen: warn text, warning count, action and duration.
+    """One topic's punishment screen: warn text, count, action, duration.
 
     The current value carries «✅» exactly like the hour grid, so every press
-    redraws the screen from the settings and no state has to be kept. The
+    redraws the screen from the topic's row and no state has to be kept. The
     duration only matters for mute/ban — a kick is instant.
     """
-    limit = _sm_punish_limit(settings)
-    action = _sm_punish_action(settings)
-    duration = _sm_punish_duration(settings)
+    limit = _sm_punish_limit(row)
+    action = _sm_punish_action(row)
+    duration = _sm_punish_duration(row)
     rows: list[list[types.InlineKeyboardButton]] = [
         [
             types.InlineKeyboardButton(
                 text=_raw("dm_sm_punish_text_btn"),
-                callback_data=f"{_PREFIX}:smpunt:{chat_id}",
+                callback_data=f"{_PREFIX}:smwt:{chat_id}:{thread_id}",
             )
         ]
     ]
@@ -894,7 +904,7 @@ def _build_sm_punish_kb(
         [
             types.InlineKeyboardButton(
                 text=f"{'✅ ' if value == limit else ''}{value}",
-                callback_data=f"{_PREFIX}:smpunc:{chat_id}:{value}",
+                callback_data=f"{_PREFIX}:smwc:{chat_id}:{thread_id}:{value}",
             )
             for value in (1, 2, 3, 5, 10)
         ]
@@ -905,7 +915,7 @@ def _build_sm_punish_kb(
                 text=(
                     f"{'✅ ' if limit <= 0 else ''}" f"{_raw('dm_sm_punish_count_off')}"
                 ),
-                callback_data=f"{_PREFIX}:smpunc:{chat_id}:0",
+                callback_data=f"{_PREFIX}:smwc:{chat_id}:{thread_id}:0",
             )
         ]
     )
@@ -916,7 +926,7 @@ def _build_sm_punish_kb(
                     f"{'✅ ' if value == action else ''}"
                     f"{_raw(f'dm_sm_punish_action_{value}')}"
                 ),
-                callback_data=f"{_PREFIX}:smpuna:{chat_id}:{value}",
+                callback_data=f"{_PREFIX}:smwa:{chat_id}:{thread_id}:{value}",
             )
             for value in PUNISH_ACTIONS
         ]
@@ -928,25 +938,25 @@ def _build_sm_punish_kb(
                     f"{'✅ ' if (duration or 0) == seconds else ''}"
                     f"{punish_duration_label(_raw, seconds)}"
                 ),
-                callback_data=f"{_PREFIX}:smpund:{chat_id}:{seconds}",
+                callback_data=f"{_PREFIX}:smwd:{chat_id}:{thread_id}:{seconds}",
             )
             for seconds in (3600, 86400, 604800, 0)
         ]
     )
-    rows.extend(_sm_punish_nav_kb(_raw, chat_id).inline_keyboard)
+    rows.extend(_sm_punish_nav_kb(_raw, chat_id, thread_id).inline_keyboard)
     return types.InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def _sm_punish_nav_kb(
-    _raw: Callable[..., str], chat_id: int
+    _raw: Callable[..., str], chat_id: int, thread_id: int
 ) -> types.InlineKeyboardMarkup:
-    """Ways out of the punishment screen and its text prompt."""
+    """Ways out of a topic's punishment screen and its text prompt."""
     return types.InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 types.InlineKeyboardButton(
                     text=_raw("dm_sm_punish_back"),
-                    callback_data=f"{_PREFIX}:smpun:{chat_id}",
+                    callback_data=f"{_PREFIX}:smt:{chat_id}:{thread_id}",
                     icon_custom_emoji_id=_ICON_BACK,  # ◀
                 )
             ],
@@ -965,13 +975,14 @@ def _sm_punish_nav_kb(
     )
 
 
-def _sm_punish_row(
-    _raw: Callable[..., str], chat_id: int
+def _sm_punish_locked_row(
+    _raw: Callable[..., str], chat_id: int, thread_id: int
 ) -> types.InlineKeyboardButton:
-    """Entry button of the punishment screen (bottom of the topic list)."""
+    """«Set this topic's own limit first» — the only way into a punishment."""
     return types.InlineKeyboardButton(
-        text=_raw("dm_sm_punish_btn"),
-        callback_data=f"{_PREFIX}:smpun:{chat_id}",
+        text=_raw("dm_sm_punish_set_limit"),
+        callback_data=f"{_PREFIX}:smt:{chat_id}:{thread_id}",
+        icon_custom_emoji_id=_ICON_SETTINGS,  # ⚙
     )
 
 
@@ -1004,10 +1015,6 @@ def _build_sm_topics_empty_kb(
     builder.button(
         text=_raw("dm_sm_topics_add"),
         callback_data=f"{_PREFIX}:smadd:{chat_id}",
-    )
-    builder.button(
-        text=_raw("dm_sm_punish_btn"),
-        callback_data=f"{_PREFIX}:smpun:{chat_id}",
     )
     builder.button(
         text=_raw("dm_sm_topics_back"),
@@ -1248,31 +1255,25 @@ async def on_dm_callback(
         await _dm_sm_chat_rule_toggle(callback, action, state, _, _raw, session)
         return
 
-    # Punishment for slow-mode violations (smpun*): text prompt, then the three
-    # value families. The bare ``smpun:`` screen MUST be matched last.
-    if action.startswith("smpunt:"):
+    # Punishment for one topic's slow-mode violations (smw*): the text prompt,
+    # then the three value families. The bare ``smw:`` screen is matched last.
+    if action.startswith("smwt:"):
         await _dm_sm_punish_text_prompt(callback, action, state, _, _raw, session)
         return
 
-    if action.startswith("smpunc:"):
-        await _dm_sm_punish_count(
-            callback, action, state, _, _raw, session, data["redis"]
-        )
+    if action.startswith("smwc:"):
+        await _dm_sm_punish_count(callback, action, state, _, _raw, session)
         return
 
-    if action.startswith("smpuna:"):
-        await _dm_sm_punish_action(
-            callback, action, state, _, _raw, session, data["redis"]
-        )
+    if action.startswith("smwa:"):
+        await _dm_sm_punish_action(callback, action, state, _, _raw, session)
         return
 
-    if action.startswith("smpund:"):
-        await _dm_sm_punish_duration(
-            callback, action, state, _, _raw, session, data["redis"]
-        )
+    if action.startswith("smwd:"):
+        await _dm_sm_punish_duration(callback, action, state, _, _raw, session)
         return
 
-    if action.startswith("smpun:"):
+    if action.startswith("smw:"):
         await _dm_sm_punish(callback, action, state, _, _raw, session)
         return
 
@@ -1905,24 +1906,35 @@ async def _sm_seed_topics_state(
     return cfg
 
 
-async def _sm_settings_dict(session: AsyncSession, chat_id: int) -> dict[str, Any]:
-    """The chat's settings as a plain dict (the shape the Redis copy has)."""
-    return crud.settings_to_dict(await crud.get_or_create_settings(session, chat_id))
-
-
-async def _sm_show_punish(
+async def _sm_punish_redraw(
     callback: types.CallbackQuery,
     chat_id: int,
+    thread_id: int,
     _: Callable[..., str],
     _raw: Callable[..., str],
     session: AsyncSession,
 ) -> None:
-    """Draw the punishment screen from the settings (never from FSM state)."""
-    settings = await _sm_settings_dict(session, chat_id)
+    """Draw one topic's punishment screen from the DB (never from FSM state)."""
+    topic = await _sm_topic_label(session, chat_id, thread_id)
+    row = await crud.get_slow_mode_topic(session, chat_id, thread_id)
+    if row is None:
+        # Only reachable from an old message: a topic without its own limit has
+        # no rule to punish, so point at the grid instead of inventing one.
+        await _edit_or_answer(
+            callback,
+            _("dm_sm_punish_no_limit", topic=topic),
+            types.InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [_sm_punish_locked_row(_raw, chat_id, thread_id)],
+                    *_sm_punish_nav_kb(_raw, chat_id, thread_id).inline_keyboard,
+                ]
+            ),
+        )
+        return
     await _edit_or_answer(
         callback,
-        _sm_punish_text(_, settings),
-        _build_sm_punish_kb(_raw, chat_id, settings),
+        _sm_punish_text(_, row, topic),
+        _build_sm_punish_kb(_raw, chat_id, thread_id, row),
     )
 
 
@@ -1934,18 +1946,20 @@ async def _dm_sm_punish(
     _raw: Callable[..., str],
     session: AsyncSession,
 ) -> None:
-    """«⚠️ Наказание за нарушения»: how violators are warned and punished.
+    """«⚠️ Наказание за нарушения» of ONE topic (``dm:smw:<chat>:<thread>``).
 
-    One tap from the topic list (``dm:smpun:``) with no sub-menu in between:
-    the four settings are the screen itself.
+    Reached from that topic's hour grid, so the four settings belong to the
+    topic that carries the limit — the same screen in another topic edits that
+    topic's own values.
     """
-    ids = _sm_ids(action, 1)
+    ids = _sm_ids(action, 2)
     if ids is None:
         await callback.answer()
         return
-    chat_id = ids[0]
+    chat_id, thread_id = ids
     await _sm_seed_topics_state(state, session, chat_id)
-    await _sm_show_punish(callback, chat_id, _, _raw, session)
+    await state.update_data(thread_id=thread_id)
+    await _sm_punish_redraw(callback, chat_id, thread_id, _, _raw, session)
     await callback.answer()
 
 
@@ -1957,18 +1971,18 @@ async def _dm_sm_punish_text_prompt(
     _raw: Callable[..., str],
     session: AsyncSession,
 ) -> None:
-    """«📝 Текст предупреждения»: ask for the text shown to violators."""
-    ids = _sm_ids(action, 1)
+    """«📝 Текст предупреждения»: ask for the text shown to the topic's violators."""
+    ids = _sm_ids(action, 2)
     if ids is None:
         await callback.answer()
         return
-    chat_id = ids[0]
+    chat_id, thread_id = ids
     await state.set_state(DmSlowMode.awaiting_sm_punish_text)
-    await state.update_data(chat_id=chat_id)
+    await state.update_data(chat_id=chat_id, thread_id=thread_id)
     await _edit_or_answer(
         callback,
         _("dm_sm_punish_text_prompt"),
-        _sm_punish_nav_kb(_raw, chat_id),
+        _sm_punish_nav_kb(_raw, chat_id, thread_id),
     )
     await callback.answer()
 
@@ -1980,18 +1994,18 @@ async def _dm_sm_punish_count(
     _: Callable[..., str],
     _raw: Callable[..., str],
     session: AsyncSession,
-    redis: Any,
 ) -> None:
-    """Warnings before the punishment (``dm:smpunc:``; 0 = never punish)."""
-    ids = _sm_ids(action, 2)
+    """Warnings before the punishment (``dm:smwc:``; 0 = never punish)."""
+    ids = _sm_ids(action, 3)
     if ids is None:
         await callback.answer()
         return
-    chat_id, value = ids
-    await crud.update_settings(session, chat_id, sm_warn_limit=max(0, value))
+    chat_id, thread_id, value = ids
+    await crud.set_slow_mode_topic(
+        session, chat_id, thread_id, punish_limit=max(0, value)
+    )
     await session.commit()
-    await redis.invalidate_settings(chat_id)
-    await _sm_show_punish(callback, chat_id, _, _raw, session)
+    await _sm_punish_redraw(callback, chat_id, thread_id, _, _raw, session)
     await callback.answer()
 
 
@@ -2002,27 +2016,25 @@ async def _dm_sm_punish_action(
     _: Callable[..., str],
     _raw: Callable[..., str],
     session: AsyncSession,
-    redis: Any,
 ) -> None:
-    """Punishment type: mute / kick / ban (``dm:smpuna:``).
+    """Punishment type: mute / kick / ban (``dm:smwa:<chat>:<thread>:<action>``).
 
     Parsed by hand: the value is a word, so ``_sm_ids`` (numeric-only) cannot
     read this callback.
     """
     parts = action.split(":")
     value = parts[-1].lower() if parts else ""
+    if len(parts) != 4 or value not in PUNISH_ACTIONS:
+        await callback.answer()
+        return
     try:
-        chat_id = int(parts[1])
-    except (IndexError, ValueError):
+        chat_id, thread_id = int(parts[1]), int(parts[2])
+    except ValueError:
         await callback.answer()
         return
-    if len(parts) != 3 or value not in PUNISH_ACTIONS:
-        await callback.answer()
-        return
-    await crud.update_settings(session, chat_id, sm_punish_action=value)
+    await crud.set_slow_mode_topic(session, chat_id, thread_id, punish_action=value)
     await session.commit()
-    await redis.invalidate_settings(chat_id)
-    await _sm_show_punish(callback, chat_id, _, _raw, session)
+    await _sm_punish_redraw(callback, chat_id, thread_id, _, _raw, session)
     await callback.answer()
 
 
@@ -2033,20 +2045,18 @@ async def _dm_sm_punish_duration(
     _: Callable[..., str],
     _raw: Callable[..., str],
     session: AsyncSession,
-    redis: Any,
 ) -> None:
-    """Punishment duration for mute/ban (``dm:smpund:``; 0 = forever)."""
-    ids = _sm_ids(action, 2)
+    """Punishment duration for mute/ban (``dm:smwd:``; 0 = forever)."""
+    ids = _sm_ids(action, 3)
     if ids is None:
         await callback.answer()
         return
-    chat_id, seconds = ids
-    await crud.update_settings(
-        session, chat_id, sm_punish_duration=(seconds if seconds > 0 else None)
+    chat_id, thread_id, seconds = ids
+    await crud.set_slow_mode_topic(
+        session, chat_id, thread_id, punish_duration=(seconds if seconds > 0 else None)
     )
     await session.commit()
-    await redis.invalidate_settings(chat_id)
-    await _sm_show_punish(callback, chat_id, _, _raw, session)
+    await _sm_punish_redraw(callback, chat_id, thread_id, _, _raw, session)
     await callback.answer()
 
 
@@ -2183,8 +2193,7 @@ async def _sm_set_topic_interval(
     ``regular_seconds`` is the single value the rule uses for every role in the
     topic; a legacy ``wl_seconds`` is cleared on every write so no stale split
     survives in the database. Choosing a limit also turns the rule on in this
-    topic — otherwise a value set while the topic was off would look inert
-    («⛔ Выключить здесь» in the grid is the way to keep it off).
+    topic — otherwise a value set while the topic was off would look inert.
     """
     await crud.set_slow_mode_topic(
         session,
@@ -3152,7 +3161,8 @@ async def dm_sm_punish_text(
 
     state_data = await state.get_data()
     chat_id = state_data.get("chat_id")
-    if chat_id is None:
+    thread_id = state_data.get("thread_id")
+    if chat_id is None or thread_id is None:
         await state.clear()
         await message.answer(_("dm_menu_title"), reply_markup=build_main_menu(_raw))
         return
@@ -3164,20 +3174,31 @@ async def dm_sm_punish_text(
     elif len(text) > _SM_WARN_TEXT_MAX:
         await message.answer(
             _("dm_sm_punish_text_long"),
-            reply_markup=_sm_punish_nav_kb(_raw, chat_id),
+            reply_markup=_sm_punish_nav_kb(_raw, chat_id, thread_id),
         )
         return
     else:
         value = text
 
-    await crud.update_settings(session, chat_id, sm_warn_text=value)
+    await crud.set_slow_mode_topic(session, chat_id, thread_id, punish_text=value)
     await session.commit()
-    await data["redis"].invalidate_settings(chat_id)
     await state.clear()
-    settings = await _sm_settings_dict(session, chat_id)
+    topic = await _sm_topic_label(session, chat_id, thread_id)
+    row = await crud.get_slow_mode_topic(session, chat_id, thread_id)
+    if row is None:
+        await message.answer(
+            _("dm_sm_punish_no_limit", topic=topic),
+            reply_markup=types.InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [_sm_punish_locked_row(_raw, chat_id, thread_id)],
+                    *_sm_punish_nav_kb(_raw, chat_id, thread_id).inline_keyboard,
+                ]
+            ),
+        )
+        return
     await message.answer(
-        _sm_punish_text(_, settings),
-        reply_markup=_build_sm_punish_kb(_raw, chat_id, settings),
+        _sm_punish_text(_, row, topic),
+        reply_markup=_build_sm_punish_kb(_raw, chat_id, thread_id, row),
     )
 
 

@@ -109,16 +109,6 @@ class ChatSettings(Base):
     # Triggers / auto-replies (Phase 3)
     triggers_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    # Slow-mode violations (chat-level, deliberately NOT on the slow_mode row:
-    # they must survive the rule being switched off). `sm_warn_limit == 0` means
-    # «never punish»; `sm_punish_duration` NULL means «forever».
-    sm_warn_text: Mapped[str | None] = mapped_column(Text, nullable=True)
-    sm_warn_limit: Mapped[int] = mapped_column(Integer, default=0)
-    sm_punish_action: Mapped[str] = mapped_column(String(20), default="mute")
-    sm_punish_duration: Mapped[int | None] = mapped_column(
-        Integer, nullable=True, default=3600
-    )
-
     # Statistics (Phase 4)
     stats_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
@@ -173,6 +163,15 @@ class SlowModeTopic(Base):
     # NULL = inherit the chat-level interval (0 is a real value = unlimited).
     regular_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     wl_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Punishment for THIS topic's violations. `punish_limit == 0` means
+    # «never punish»; `punish_duration` NULL means «forever» (a kick ignores it).
+    punish_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    punish_limit: Mapped[int] = mapped_column(Integer, default=0)
+    punish_action: Mapped[str] = mapped_column(String(20), default="mute")
+    punish_duration: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, default=3600
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

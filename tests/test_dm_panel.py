@@ -556,7 +556,6 @@ async def test_panel_slowmode_opens_the_topic_list(base_data, fsm, monkeypatch):
         [f"dm:smc:{GROUP_CHAT_ID}"],
         [f"dm:smball:{GROUP_CHAT_ID}"],
         [f"dm:smadd:{GROUP_CHAT_ID}"],
-        [f"dm:smpun:{GROUP_CHAT_ID}"],
         [f"dm:smback:{GROUP_CHAT_ID}"],
     ]
     cb.answer.assert_awaited_once()

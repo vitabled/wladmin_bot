@@ -69,10 +69,6 @@ _SETTINGS_FIELDS = frozenset(
         "newbie_period",
         "triggers_enabled",
         "stats_enabled",
-        "sm_warn_text",
-        "sm_warn_limit",
-        "sm_punish_action",
-        "sm_punish_duration",
     }
 )
 
@@ -244,13 +240,19 @@ async def set_slow_mode_topic(
     enabled: bool | None = None,
     regular_seconds: Any = UNSET,
     wl_seconds: Any = UNSET,
+    punish_text: Any = UNSET,
+    punish_limit: Any = UNSET,
+    punish_action: Any = UNSET,
+    punish_duration: Any = UNSET,
 ) -> SlowModeTopic:
     """Create or update a per-topic override (caller commits).
 
     ``enabled=None`` leaves the switch untouched (True on first creation).
     ``regular_seconds``/``wl_seconds`` take :data:`UNSET` for «leave as is»,
     ``None`` to store NULL (inherit the chat interval) or an int to pin the
-    topic's own interval — 0 stays a real value (unlimited).
+    topic's own interval — 0 stays a real value (unlimited). The ``punish_*``
+    arguments follow the same rule: the punishment belongs to the topic that
+    carries the limit, so it lives on this row and not on the chat settings.
     """
     topic = await session.get(SlowModeTopic, (chat_id, thread_id))
     if topic is None:
@@ -262,6 +264,14 @@ async def set_slow_mode_topic(
         topic.regular_seconds = regular_seconds
     if wl_seconds is not UNSET:
         topic.wl_seconds = wl_seconds
+    if punish_text is not UNSET:
+        topic.punish_text = punish_text
+    if punish_limit is not UNSET:
+        topic.punish_limit = punish_limit
+    if punish_action is not UNSET:
+        topic.punish_action = punish_action
+    if punish_duration is not UNSET:
+        topic.punish_duration = punish_duration
     await session.flush()
     return topic
 
