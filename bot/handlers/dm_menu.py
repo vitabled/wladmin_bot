@@ -724,24 +724,14 @@ def _build_sm_topic_kb(
     thread_id: int,
     override: Any,
 ) -> types.InlineKeyboardMarkup:
-    """Per-topic slow-mode keyboard: switch, interval, reset, nav.
+    """Per-topic slow-mode keyboard: interval, reset, nav.
 
-    The switch flips only this thread («⛔ Выключить здесь» / «✅ Включить
-    здесь»); the interval button opens the hour grid (its caption shows the
-    effective value) and «↩️ Как в чате» (only when a row exists) drops the
-    override. Nothing needs typing.
+    The interval button opens the hour grid (its caption shows the effective
+    value; «⛔ Выключить здесь» lives inside that grid) and «↩️ Как в чате»
+    (only when a row exists) drops the override. Nothing needs typing.
     """
-    off_here = override is not None and override.enabled
     hours = _sm_hours_label(_raw, _sm_topic_hours(cfg, override))
     rows: list[list[types.InlineKeyboardButton]] = [
-        [
-            types.InlineKeyboardButton(
-                text=_raw(
-                    "dm_sm_topic_switch_off" if off_here else "dm_sm_topic_switch_on"
-                ),
-                callback_data=f"{_PREFIX}:smtx:{chat_id}:{thread_id}",
-            )
-        ],
         [
             types.InlineKeyboardButton(
                 text=_raw("dm_sm_topic_all_btn", hours=hours),
@@ -781,13 +771,15 @@ def _build_sm_topic_pick_kb(
     thread_id: int,
     current: int,
     own: bool,
+    off_here: bool = False,
 ) -> types.InlineKeyboardMarkup:
-    """Hour grid for a topic: presets, ±1 ч, reset, manual, nav.
+    """Hour grid for a topic: presets, ±1 ч, reset, on/off, manual, nav.
 
     The matching preset carries «✅», so the screen stays stateless — every
     press redraws it from the database. «±1 ч» is hidden for «∞» (0); «↩️ Как
     в чате» only shows when this topic has its own value; the typed prompt is
-    one tap away for unusual values.
+    one tap away for unusual values. The rule for this topic is switched off
+    (and back on) from here too — there is no separate switch button.
     """
     rows: list[list[types.InlineKeyboardButton]] = []
     row: list[types.InlineKeyboardButton] = []
@@ -835,6 +827,20 @@ def _build_sm_topic_pick_kb(
                 )
             ]
         )
+    rows.append(
+        [
+            types.InlineKeyboardButton(
+                text=_raw(
+                    "dm_sm_topic_switch_on" if off_here else "dm_sm_topic_switch_off"
+                ),
+                callback_data=(
+                    f"{_PREFIX}:smtvc:{chat_id}:{thread_id}"
+                    if off_here
+                    else f"{_PREFIX}:smtvo:{chat_id}:{thread_id}"
+                ),
+            )
+        ]
+    )
     rows.append(
         [
             types.InlineKeyboardButton(
@@ -1122,6 +1128,12 @@ async def on_dm_callback(
 
     if action.startswith("smtvi:"):
         await _dm_sm_topic_pick_inherit(callback, action, state, _, _raw, session)
+        return
+
+    if action.startswith(("smtvo:", "smtvc:")):
+        await _dm_sm_topic_pick_power(
+            callback, action, state, _, _raw, session, on=action.startswith("smtvc:")
+        )
         return
 
     if action.startswith("smtv:"):
@@ -1696,7 +1708,9 @@ async def _dm_sm_topics_done(
 # --------------------------------------------------------------------------- #
 # Медленный режим: параметры ОТДЕЛЬНОЙ ветки
 # (dm:smtl:<chat> — список, dm:smt:<chat>:<thread> — экран ветки,
-#  dm:smtx: — переключатель, dm:smtv: — лимит для всех, dm:smtp: — ввод вручную,
+#  dm:smtv: — лимит для всех, dm:smtvo:/dm:smtvc: — выкл/вкл здесь,
+#  dm:smtp: — ввод вручную (dm:smtx: — старый переключатель, оставлен для
+#  уже отправленных сообщений),
 #  dm:smtr: — как в чате)
 # --------------------------------------------------------------------------- #
 def _sm_ids(action: str, count: int) -> list[int] | None:
@@ -1834,6 +1848,34 @@ async def _dm_sm_topic_switch(
     await callback.answer()
 
 
+async def _dm_sm_topic_pick_power(
+    callback: types.CallbackQuery,
+    action: str,
+    state: FSMContext,
+    _: Callable[..., str],
+    _raw: Callable[..., str],
+    session: AsyncSession,
+    *,
+    on: bool,
+) -> None:
+    """«⛔ Выключить здесь» / «✅ Включить здесь» inside the hour grid.
+
+    The grid is the only place that switches this topic: a missing row counts
+    as «включено» (the topic follows the chat), so switching off stores an
+    explicit off-override. The scope toggle in the list (``dm:smb:``) is a
+    different thing — see ``_dm_sm_topic_toggle``.
+    """
+    ids = _sm_ids(action, 2)
+    if ids is None:
+        await callback.answer()
+        return
+    chat_id, thread_id = ids
+    await crud.set_slow_mode_topic(session, chat_id, thread_id, enabled=on)
+    await session.commit()
+    await _sm_show_pick(callback, chat_id, thread_id, _, _raw, session)
+    await callback.answer()
+
+
 async def _dm_sm_topic_set(
     callback: types.CallbackQuery,
     action: str,
@@ -1925,11 +1967,12 @@ async def _sm_show_pick(
     override = await crud.get_slow_mode_topic(session, chat_id, thread_id)
     label = await _sm_topic_label(session, chat_id, thread_id)
     own = override is not None and override.regular_seconds is not None
+    off_here = override is not None and not override.enabled
     await _edit_or_answer(
         callback,
         _sm_pick_text(_, cfg, override, label),
         _build_sm_topic_pick_kb(
-            _raw, chat_id, thread_id, _sm_topic_hours(cfg, override), own
+            _raw, chat_id, thread_id, _sm_topic_hours(cfg, override), own, off_here
         ),
     )
 

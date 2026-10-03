@@ -447,10 +447,11 @@ async def test_topic_screen_inherits_chat(base_data, fsm, monkeypatch):
         "wl": 3,
     }
     assert _kb_rows(cb) == [
-        [f"dm:smtx:{GROUP_CHAT_ID}:3"],
         [f"dm:smtv:{GROUP_CHAT_ID}:3"],
         [f"dm:smtl:{GROUP_CHAT_ID}", "dm:menu"],
     ]
+    # The on/off switch lives inside the grid now, not on this screen.
+    assert not [cb for cb in _all_callbacks(cb) if ":smtx:" in cb]
     # No override yet → no «Как в чате» row.
     assert f"dm:smtr:{GROUP_CHAT_ID}:3" not in _all_callbacks(cb)
 
@@ -486,8 +487,8 @@ async def test_topic_screen_off_here_and_chat_off(base_data, fsm, monkeypatch):
     cb = _cb(f"dm:smt:{GROUP_CHAT_ID}:3")
     await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
     assert any(key == "dm_sm_topic_state_off" for key, _kw in calls)
-    kb = cb.message.edit_text.await_args.kwargs["reply_markup"]
-    assert kb.inline_keyboard[0][0].text == "dm_sm_topic_switch_on"
+    assert f"dm:smtv:{GROUP_CHAT_ID}:3" in _all_callbacks(cb)
+    assert f"dm:smtr:{GROUP_CHAT_ID}:3" in _all_callbacks(cb)
 
     calls.clear()
     monkeypatch.setattr(crud, "get_slow_mode", AsyncMock(return_value=None))
@@ -496,7 +497,10 @@ async def test_topic_screen_off_here_and_chat_off(base_data, fsm, monkeypatch):
     assert any(key == "dm_sm_topic_state_chat_off" for key, _kw in calls)
 
 
-async def test_topic_switch_flips_and_commits(base_data, fsm, monkeypatch):
+async def test_legacy_topic_switch_still_flips_and_commits(
+    base_data, fsm, monkeypatch
+):
+    """Buttons from already-sent messages keep working (``dm:smtx:``)."""
     row = _override(enabled=True)
     monkeypatch.setattr(crud, "get_slow_mode", AsyncMock(return_value=_config()))
     monkeypatch.setattr(crud, "get_slow_mode_topic", AsyncMock(return_value=row))
@@ -514,7 +518,7 @@ async def test_topic_switch_flips_and_commits(base_data, fsm, monkeypatch):
     cb.answer.assert_awaited_once()
 
 
-async def test_topic_switch_without_row_enables_then_disables(
+async def test_legacy_topic_switch_without_row_stores_off(
     base_data, fsm, monkeypatch
 ):
     """A missing row counts as «following the chat», so the first press = off."""
@@ -592,7 +596,7 @@ async def test_topic_screen_interval_buttons_carry_effective_hours(
     await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
 
     kb = cb.message.edit_text.await_args.kwargs["reply_markup"]
-    assert kb.inline_keyboard[1][0].callback_data == f"dm:smtv:{GROUP_CHAT_ID}:3"
+    assert kb.inline_keyboard[0][0].callback_data == f"dm:smtv:{GROUP_CHAT_ID}:3"
     assert ("dm_sm_hours", {"hours": 2}) in calls  # own value wins
 
 
@@ -628,6 +632,7 @@ async def test_topic_pick_opens_grid_and_marks_current(base_data, fsm, monkeypat
         ],
         [f"dm:smtvs:{GROUP_CHAT_ID}:3:0"],
         [f"dm:smtvm:{GROUP_CHAT_ID}:3", f"dm:smtvp:{GROUP_CHAT_ID}:3"],
+        [f"dm:smtvo:{GROUP_CHAT_ID}:3"],
         [f"dm:smtp:{GROUP_CHAT_ID}:3"],
         [f"dm:smt:{GROUP_CHAT_ID}:3", "dm:menu"],
     ]
@@ -845,6 +850,57 @@ async def test_topic_pick_shows_inherit_with_own_value(base_data, fsm, monkeypat
     await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
 
     assert f"dm:smtvi:{GROUP_CHAT_ID}:3" in _all_callbacks(cb)
+
+
+async def test_topic_pick_off_button_switches_this_topic_off(
+    base_data, fsm, monkeypatch
+):
+    """«⛔ Выключить здесь» sits in the grid — no separate switch screen."""
+    monkeypatch.setattr(crud, "get_slow_mode", AsyncMock(return_value=_config()))
+    monkeypatch.setattr(
+        crud,
+        "get_slow_mode_topic",
+        AsyncMock(return_value=_override(enabled=True, regular=21600)),
+    )
+    set_mock = AsyncMock()
+    monkeypatch.setattr(crud, "set_slow_mode_topic", set_mock)
+
+    cb = _cb(f"dm:smtv:{GROUP_CHAT_ID}:3")
+    await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
+    rows = _kb_rows(cb)
+    assert [f"dm:smtvo:{GROUP_CHAT_ID}:3"] in rows
+    assert f"dm:smtvc:{GROUP_CHAT_ID}:3" not in _all_callbacks(cb)
+
+    set_mock.reset_mock()
+    cb = _cb(f"dm:smtvo:{GROUP_CHAT_ID}:3")
+    await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
+    set_mock.assert_awaited_once_with(base_data["session"], GROUP_CHAT_ID, 3, enabled=False)
+    base_data["session"].commit.assert_awaited_once()
+    # Pressing it redraws the same grid, not another screen.
+    assert cb.message.edit_text.await_args.args[0].startswith("dm_sm_topic_pick_all")
+
+
+async def test_topic_pick_on_button_switches_this_topic_back_on(
+    base_data, fsm, monkeypatch
+):
+    monkeypatch.setattr(crud, "get_slow_mode", AsyncMock(return_value=_config()))
+    monkeypatch.setattr(
+        crud,
+        "get_slow_mode_topic",
+        AsyncMock(return_value=_override(enabled=False, regular=21600)),
+    )
+    set_mock = AsyncMock()
+    monkeypatch.setattr(crud, "set_slow_mode_topic", set_mock)
+
+    cb = _cb(f"dm:smtv:{GROUP_CHAT_ID}:3")
+    await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
+    assert [f"dm:smtvc:{GROUP_CHAT_ID}:3"] in _kb_rows(cb)
+
+    set_mock.reset_mock()
+    cb = _cb(f"dm:smtvc:{GROUP_CHAT_ID}:3")
+    await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
+    set_mock.assert_awaited_once_with(base_data["session"], GROUP_CHAT_ID, 3, enabled=True)
+    base_data["session"].commit.assert_awaited_once()
 
 
 async def test_topic_callbacks_accept_legacy_role_suffix(base_data, fsm, monkeypatch):
