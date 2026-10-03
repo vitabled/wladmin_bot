@@ -195,19 +195,22 @@ async def test_tab_admin_group_panel_has_slowmode_stats_top_no_scam_wl(
 
 
 # --------------------------------------------------------------------------- #
-# Slow mode (dm:sm:<chat_id> → DmSlowMode.awaiting_config)
+# Slow mode (dm:sm:<chat_id> → the topic list, no in-between screen)
 # --------------------------------------------------------------------------- #
-async def test_slow_mode_callback_sets_state(base_data, fsm, monkeypatch):
+async def test_slow_mode_callback_opens_the_topic_list(base_data, fsm, monkeypatch):
     monkeypatch.setattr(crud, "get_slow_mode", AsyncMock(return_value=None))
+    monkeypatch.setattr(crud, "list_topics", AsyncMock(return_value=[]))
+    monkeypatch.setattr(crud, "list_slow_mode_topics", AsyncMock(return_value=[]))
     cb = _cb(f"dm:sm:{GROUP_CHAT_ID}")
     await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
-    assert await fsm.get_state() == dm_menu.DmSlowMode.awaiting_config
+    assert await fsm.get_state() == dm_menu.DmSlowMode.awaiting_topics
     assert (await fsm.get_data())["chat_id"] == GROUP_CHAT_ID
-    assert cb.message.edit_text.await_args.args[0] == "dm_sm_prompt"
+    assert cb.message.edit_text.await_args.args[0] == "dm_sm_topics_empty"
     kb = cb.message.edit_text.await_args.kwargs["reply_markup"]
     assert [[btn.callback_data for btn in row] for row in kb.inline_keyboard] == [
-        [f"dm:smtl:{GROUP_CHAT_ID}"],
-        [f"dm:g:{GROUP_CHAT_ID}", "dm:menu"],
+        [f"dm:smball:{GROUP_CHAT_ID}"],
+        [f"dm:smadd:{GROUP_CHAT_ID}"],
+        [f"dm:smback:{GROUP_CHAT_ID}"],
     ]
     cb.answer.assert_awaited_once()
 

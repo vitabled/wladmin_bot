@@ -15,8 +15,13 @@ scope applies to the whole chat (all topics + non-forum messages).
 exempts the topic even inside the scope, and the row's own
 ``regular_seconds`` sets ONE interval for everyone in that topic (verified
 sellers included) instead of the chat's split; NULL inherits the chat values.
-A legacy per-topic ``wl_seconds`` is ignored. Overrides are consulted only
-while the chat-level row is enabled.
+A legacy per-topic ``wl_seconds`` is ignored.
+
+A topic row stands on its own: it is enforced even when the chat-level row is
+missing or ``enabled=False`` (the chat's switch only governs topics WITHOUT a
+row, so admins keep one global default without having to pre-enable it). A row
+turned on with no own value falls back to the chat's values, or to the 6 h /
+3 h defaults when the chat has no row at all.
 
 Fail-open by design: non-group chats, bots/anonymous senders, disabled config
 and non-positive intervals are always allowed. Callers must not let slow mode
@@ -38,6 +43,11 @@ logger = logging.getLogger(__name__)
 _KEY_PREFIX = "slow:"
 
 GROUP_TYPES = ("group", "supergroup")
+
+# Defaults the settings screen seeds when a chat has no row of its own; a topic
+# turned on without an own value uses them too (see _effective).
+DEFAULT_REGULAR_SECONDS = 21600
+DEFAULT_WL_SECONDS = 10800
 
 
 async def check_and_record(bot, message, data: dict) -> bool:
@@ -63,23 +73,18 @@ async def check_and_record(bot, message, data: dict) -> bool:
     if data.get("is_admin") or data.get("is_owner"):
         return True
 
-    # (d) The chat must have slow mode enabled. «выкл» on the chat wins over
-    # every per-topic override, so admins keep one global switch.
-    config = await crud.get_slow_mode(data["session"], message.chat.id)
-    if config is None or not config.enabled:
-        return True
-
-    # (e) A per-topic override (forum threads only) comes first: its own
-    # on/off switch, and its own intervals with NULL meaning «inherit the chat
-    # value». Without a row the legacy chat scope applies — a non-empty
-    # topic_ids list restricts the rule to those threads, while other topics
-    # and non-forum topic 0 are allowed and NOT recorded.
+    # (d) A per-topic override (forum threads only) comes first: its own on/off
+    # switch and its own interval, with NULL meaning «use the chat's value». A
+    # topic row is self-contained — it applies even when the chat-wide row is
+    # missing or off, so a per-topic limit never depends on the chat switch.
     topic = message.message_thread_id or 0
     override = (
         await crud.get_slow_mode_topic(data["session"], message.chat.id, topic)
         if topic
         else None
     )
+    # The chat row is only the default for topics WITHOUT a row of their own.
+    config = await crud.get_slow_mode(data["session"], message.chat.id)
     if override is not None:
         if not override.enabled:
             return True
@@ -88,9 +93,17 @@ async def check_and_record(bot, message, data: dict) -> bool:
             # split into the chat's regular/WL windows (a legacy per-topic
             # ``wl_seconds`` is ignored — the settings screen sets one number).
             regular = wl = override.regular_seconds
-        else:
+        elif config is not None:
             regular, wl = config.regular_seconds, config.wl_seconds
+        else:
+            regular, wl = DEFAULT_REGULAR_SECONDS, DEFAULT_WL_SECONDS
     else:
+        # (e) Without a row the legacy chat scope applies — a non-empty
+        # topic_ids list restricts the rule to those threads, while other
+        # topics and non-forum topic 0 are allowed and NOT recorded. «выкл» on
+        # the chat still means «no limit anywhere a topic has no rule».
+        if config is None or not config.enabled:
+            return True
         if config.topic_ids and topic not in config.topic_ids:
             return True
         regular, wl = config.regular_seconds, config.wl_seconds

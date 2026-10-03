@@ -614,39 +614,6 @@ def _build_sm_topics_kb(
     return types.InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def _build_sm_entry_kb(
-    _raw: Callable[..., str], chat_id: int
-) -> types.InlineKeyboardMarkup:
-    """Slow-mode entry screen: open the per-topic list, or leave to the panel.
-
-    The per-topic list is the primary way in — the typed chat-wide prompt is
-    still there for the defaults, but the topics no longer require typing.
-    """
-    return types.InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                types.InlineKeyboardButton(
-                    text=_raw("dm_sm_topics_open"),
-                    callback_data=f"{_PREFIX}:smtl:{chat_id}",
-                    icon_custom_emoji_id=_ICON_SETTINGS,  # ⚙
-                )
-            ],
-            [
-                types.InlineKeyboardButton(
-                    text=_raw("dm_panel_back"),
-                    callback_data=f"{_PREFIX}:g:{chat_id}",
-                    icon_custom_emoji_id=_ICON_BACK,  # ◀
-                ),
-                types.InlineKeyboardButton(
-                    text=_raw("dm_menu_home"),
-                    callback_data=f"{_PREFIX}:menu",
-                    icon_custom_emoji_id=_ICON_HOME,  # 🏠
-                ),
-            ],
-        ]
-    )
-
-
 def _sm_hours_label(_: Callable[..., str], hours: int) -> str:
     """Readable interval: «6 ч», or «∞ без лимита» when 0 (no limit)."""
     if hours <= 0:
@@ -671,21 +638,28 @@ def _sm_topic_hours(cfg: Any, override: Any) -> int:
 
 
 def _sm_topic_state_text(_: Callable[..., str], cfg: Any, override: Any) -> str:
-    """One line on the topic's rule: chat off / inherit / off here / own."""
-    chat_regular = (cfg.regular_seconds // 3600) if cfg is not None else 0
-    chat_wl = (cfg.wl_seconds // 3600) if cfg is not None else 0
+    """One line on the topic's rule: off here / own / inherit / nothing here.
+
+    A topic's own row decides on its own — the chat-wide switch only governs
+    topics WITHOUT a row, so this line never claims a per-topic limit is dead
+    just because the chat's own rule is off.
+    """
+    # No chat row means the chat's defaults (the same 6 h / 3 h the FSM seeds),
+    # so «как в чате» stays meaningful for a topic that has a row of its own.
+    chat_regular = (cfg.regular_seconds // 3600) if cfg is not None else 21600 // 3600
+    chat_wl = (cfg.wl_seconds // 3600) if cfg is not None else 10800 // 3600
+    if override is not None:
+        if not override.enabled:
+            return _("dm_sm_topic_state_off")
+        if override.regular_seconds is None:
+            return _("dm_sm_topic_state_inherit", regular=chat_regular, wl=chat_wl)
+        return _(
+            "dm_sm_topic_state_own",
+            hours=_sm_hours_label(_, override.regular_seconds // 3600),
+        )
     if cfg is None or not cfg.enabled:
         return _("dm_sm_topic_state_chat_off")
-    if override is None:
-        return _("dm_sm_topic_state_inherit", regular=chat_regular, wl=chat_wl)
-    if not override.enabled:
-        return _("dm_sm_topic_state_off")
-    if override.regular_seconds is None:
-        return _("dm_sm_topic_state_inherit", regular=chat_regular, wl=chat_wl)
-    return _(
-        "dm_sm_topic_state_own",
-        hours=_sm_hours_label(_, override.regular_seconds // 3600),
-    )
+    return _("dm_sm_topic_state_inherit", regular=chat_regular, wl=chat_wl)
 
 
 def _sm_pick_text(_: Callable[..., str], cfg: Any, override: Any, label: str) -> str:
@@ -1370,29 +1344,18 @@ async def _dm_slow_mode(
     _raw: Callable[..., str],
     session: AsyncSession,
 ) -> None:
-    """Start the slow-mode config flow for the SELECTED group."""
+    """«Медленный режим» goes straight to the topic list — no in-between screen.
+
+    The chat-wide defaults keep their button path inside that list («Все
+    ветки» + «✅ Готово»), and the typed ``вкл|выкл …`` line stays available
+    for the messages already sent (see the ``awaiting_config`` handler).
+    """
     try:
         chat_id = int(chat_id_token)
     except ValueError:
         await callback.answer()
         return
-    cfg = await crud.get_slow_mode(session, chat_id)
-    topics_summary = _sm_topics_summary(_, cfg.topic_ids if cfg is not None else None)
-    if cfg is not None and cfg.enabled:
-        current = _(
-            "dm_sm_current_on",
-            regular=cfg.regular_seconds // 3600,
-            wl=cfg.wl_seconds // 3600,
-            topics=topics_summary,
-        )
-    else:
-        current = _("dm_sm_current_off", topics=topics_summary)
-    await state.set_state(DmSlowMode.awaiting_config)
-    await state.update_data(chat_id=chat_id)
-    await _edit_or_answer(
-        callback, _("dm_sm_prompt", current=current), _build_sm_entry_kb(_raw, chat_id)
-    )
-    await callback.answer()
+    await _dm_sm_topics_list(callback, f"smtl:{chat_id}", state, _, _raw, session)
 
 
 # --- slow-mode topic multi-select (dm:smb: / dm:smball: / dm:smbdone:) ----- #

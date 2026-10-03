@@ -251,14 +251,52 @@ async def test_override_enables_topic_outside_chat_scope(monkeypatch, base_data)
     assert args[0] == f"slow:{CHAT_ID}:45:{USER_ID}"
 
 
-async def test_chat_disabled_wins_over_override(monkeypatch, base_data):
+async def test_topic_row_applies_even_with_the_chat_rule_off(monkeypatch, base_data):
+    """A topic's own limit is self-contained: the chat switch does not gate it."""
     _patch_crud(
         monkeypatch,
         _config(enabled=False, regular=60, wl=30),
         topic_override=_override(enabled=True, regular=30, wl=15),
     )
     redis = base_data["redis"]
+    redis.get.return_value = None
     msg = _group_message(topic=42)
+    assert await check_and_record(make_bot(), msg, _data(base_data)) is True
+    _args, kwargs = redis.set.await_args
+    assert kwargs["ttl"] == 30 + 60  # the topic's own value, not the chat's
+
+
+async def test_topic_row_applies_without_any_chat_row(monkeypatch, base_data):
+    """No chat config at all: a topic with its own value still limits."""
+    _patch_crud(
+        monkeypatch,
+        None,
+        topic_override=_override(enabled=True, regular=90, wl=None),
+    )
+    redis = base_data["redis"]
+    redis.get.return_value = None
+    msg = _group_message(topic=42)
+    assert await check_and_record(make_bot(), msg, _data(base_data)) is True
+    _args, kwargs = redis.set.await_args
+    assert kwargs["ttl"] == 90 + 60
+
+
+async def test_topic_on_without_a_chat_row_uses_defaults(monkeypatch, base_data):
+    """«Включить здесь» with no chat row falls back to the 6 h / 3 h defaults."""
+    _patch_crud(monkeypatch, None, topic_override=_override(enabled=True))
+    redis = base_data["redis"]
+    redis.get.return_value = None
+    msg = _group_message(topic=42)
+    assert await check_and_record(make_bot(), msg, _data(base_data)) is True
+    _args, kwargs = redis.set.await_args
+    assert kwargs["ttl"] == 21600 + 60
+
+
+async def test_chat_rule_off_still_leaves_other_topics_free(monkeypatch, base_data):
+    """Topics without a row keep following the chat switch (no limit when off)."""
+    _patch_crud(monkeypatch, _config(enabled=False, regular=60, wl=30))
+    redis = base_data["redis"]
+    msg = _group_message(topic=45)
     assert await check_and_record(make_bot(), msg, _data(base_data)) is True
     redis.get.assert_not_called()
     redis.set.assert_not_called()
@@ -494,11 +532,15 @@ async def test_topic_grid_shows_off_here_and_chat_off(base_data, fsm, monkeypatc
     assert f"dm:smtvc:{GROUP_CHAT_ID}:3" in data  # «✅ Включить здесь»
     assert f"dm:smtvo:{GROUP_CHAT_ID}:3" not in data
 
+    # No row of its own + the chat rule off → an informational line, and the
+    # off/on choice becomes a plain «включить здесь».
     calls.clear()
     monkeypatch.setattr(crud, "get_slow_mode", AsyncMock(return_value=None))
+    monkeypatch.setattr(crud, "get_slow_mode_topic", AsyncMock(return_value=None))
     cb = _cb(f"dm:smt:{GROUP_CHAT_ID}:3")
     await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
     assert any(key == "dm_sm_topic_state_chat_off" for key, _kw in calls)
+    assert f"dm:smtvo:{GROUP_CHAT_ID}:3" in _all_callbacks(cb)
 
 
 async def test_legacy_topic_switch_still_flips_and_commits(base_data, fsm, monkeypatch):

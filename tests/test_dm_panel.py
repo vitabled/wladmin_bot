@@ -537,25 +537,31 @@ async def test_admin_target_wl_bot_username_keeps_state(base_data, fsm, monkeypa
 
 
 # --------------------------------------------------------------------------- #
-# Slow mode (dm:sm:<chat_id>)
+# Slow mode (dm:sm:<chat_id> → the topic list, no in-between screen)
 # --------------------------------------------------------------------------- #
-async def test_panel_slowmode_sets_fsm(base_data, fsm, monkeypatch):
+async def test_panel_slowmode_opens_the_topic_list(base_data, fsm, monkeypatch):
+    """«Медленный режим» lands on the topics, not on a text prompt screen."""
     monkeypatch.setattr(crud, "get_slow_mode", AsyncMock(return_value=None))
+    monkeypatch.setattr(crud, "list_topics", AsyncMock(return_value=[]))
+    monkeypatch.setattr(crud, "list_slow_mode_topics", AsyncMock(return_value=[]))
     cb = _cb(f"dm:sm:{GROUP_CHAT_ID}")
     await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
-    assert await fsm.get_state() == dm_menu.DmSlowMode.awaiting_config
+    assert await fsm.get_state() == dm_menu.DmSlowMode.awaiting_topics
     state_data = await fsm.get_data()
     assert state_data["chat_id"] == GROUP_CHAT_ID
-    assert cb.message.edit_text.await_args.args[0] == "dm_sm_prompt"
+    # No tracked topics → the list's own hint screen (never the old prompt).
+    assert cb.message.edit_text.await_args.args[0] == "dm_sm_topics_empty"
     kb = cb.message.edit_text.await_args.kwargs["reply_markup"]
     assert [[btn.callback_data for btn in row] for row in kb.inline_keyboard] == [
-        [f"dm:smtl:{GROUP_CHAT_ID}"],
-        [f"dm:g:{GROUP_CHAT_ID}", "dm:menu"],
+        [f"dm:smball:{GROUP_CHAT_ID}"],
+        [f"dm:smadd:{GROUP_CHAT_ID}"],
+        [f"dm:smback:{GROUP_CHAT_ID}"],
     ]
     cb.answer.assert_awaited_once()
 
 
-async def test_panel_slowmode_prompt_shows_current_config(base_data, fsm, monkeypatch):
+async def test_panel_slowmode_list_seeds_the_chat_config(base_data, fsm, monkeypatch):
+    """The list carries the chat-level values, so «Готово» keeps saving them."""
     monkeypatch.setattr(
         crud,
         "get_slow_mode",
@@ -565,17 +571,15 @@ async def test_panel_slowmode_prompt_shows_current_config(base_data, fsm, monkey
             )
         ),
     )
-    calls = _capturing_translator(base_data)
+    monkeypatch.setattr(crud, "list_topics", AsyncMock(return_value=[]))
+    monkeypatch.setattr(crud, "list_slow_mode_topics", AsyncMock(return_value=[]))
     cb = _cb(f"dm:sm:{GROUP_CHAT_ID}")
     await dm_menu.on_dm_callback(cb, state=fsm, **base_data)
-    on_kwargs = next(v for k, v in calls if k == "dm_sm_current_on")
-    assert on_kwargs == {
-        "regular": 6,
-        "wl": 3,
-        "topics": "dm_sm_topics_summary_all",
+    assert (await fsm.get_data())["pending_sm"] == {
+        "enabled": True,
+        "regular": 21600,
+        "wl": 10800,
     }
-    prompt_kwargs = next(v for k, v in calls if k == "dm_sm_prompt")
-    assert prompt_kwargs == {"current": "dm_sm_current_on"}
 
 
 async def test_dm_scam_target_from_panel_uses_risk_chat(base_data, fsm, monkeypatch):
