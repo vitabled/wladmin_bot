@@ -192,12 +192,12 @@ def build_main_menu(_raw: Callable[..., str]) -> types.InlineKeyboardMarkup:
     builder.button(
         text=_raw("dm_tab_ratings"),
         callback_data=f"{_PREFIX}:tab:ratings",
-        icon_custom_emoji_id="5451682961831257285",  # 🛡 (remnawave)
+        icon_custom_emoji_id="5776159202649051327",  # 🛡
     )
     builder.button(
         text=_raw("dm_tab_broadcast"),
         callback_data=f"{_PREFIX}:tab:broadcast",
-        icon_custom_emoji_id="5424818078833715060",  # 📣 (NewsEmoji)
+        icon_custom_emoji_id="5771695636411847302",  # 📣
     )
     builder.button(
         text=_raw("dm_menu_info"),
@@ -359,7 +359,7 @@ def _build_panel_kb(
     builder.button(
         text=_raw("dm_panel_slowmode"),
         callback_data=f"{_PREFIX}:sm:{chat_id}",
-        icon_custom_emoji_id="5382194935057372936",  # ⏱ (FinanceEmoji)
+        icon_custom_emoji_id="5936170807716745162",  # ⏱
     )
     builder.button(
         text=_raw("dm_panel_stats"),
@@ -391,12 +391,12 @@ def _build_ratings_kb(_raw: Callable[..., str]) -> types.InlineKeyboardMarkup:
     builder.button(
         text=_raw("dm_rt_check"),
         callback_data=f"{_PREFIX}:rt:check",
-        icon_custom_emoji_id="5231012545799666522",  # 🔍 (NewsEmoji)
+        icon_custom_emoji_id="5843862283964390528",  # 🔍
     )
     builder.button(
         text=_raw("dm_rt_wl"),
         callback_data=f"{_PREFIX}:rt:wl",
-        icon_custom_emoji_id="5267500801240092311",  # ⭐ (FinanceEmoji)
+        icon_custom_emoji_id="5958376256788502078",  # ⭐
     )
     builder.button(
         text=_raw("dm_rt_wlrm"),
@@ -503,7 +503,7 @@ def _build_topics_kb(
     builder.button(
         text=_raw("dm_bc_go"),
         callback_data=f"{_PREFIX}:bcgo:{chat_id}",
-        icon_custom_emoji_id="5197269100878907942",  # ✍ (FinanceEmoji)
+        icon_custom_emoji_id="5879841310902324730",  # ✍
     )
     builder.button(
         text=_raw("dm_bc_topics_refresh"),

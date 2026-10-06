@@ -771,7 +771,7 @@ async def test_broadcast_topics_checkboxes(base_data, fsm, monkeypatch):
     assert rows[1][0].callback_data == f"dm:bct:{GROUP_CHAT_ID}:7"
     assert rows[2][0].callback_data == f"dm:bcgo:{GROUP_CHAT_ID}"
     assert rows[2][0].text == "dm_bc_go"
-    assert rows[2][0].icon_custom_emoji_id == "5197269100878907942"  # ✍
+    assert rows[2][0].icon_custom_emoji_id == "5879841310902324730"  # ✍ (TgAndroidIcons)
     assert rows[3][0].callback_data == f"dm:bcr:{GROUP_CHAT_ID}"
     assert rows[4][0].callback_data == f"dm:bcadd:{GROUP_CHAT_ID}"
     assert rows[5][0].callback_data == "dm:menu"
