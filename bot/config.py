@@ -41,6 +41,13 @@ class Settings(BaseSettings):
     # restricted. Parsed by the ``allowed_dm_ids`` property.
     ALLOWED_DM_IDS: str = ""
 
+    # --- Staff roles ---
+    # Comma-separated Telegram user IDs seeded as ``admin`` staff on startup;
+    # OWNER_ID is always seeded as ``owner``. Parsed by ``default_staff_ids``
+    # (blank/junk tokens are ignored). Distinct from ALLOWED_DM_IDS, which only
+    # narrows web access and never grants staff rights.
+    DEFAULT_STAFF_IDS: str = ""
+
     # --- Database / cache ---
     DATABASE_URL: str
     REDIS_URL: str = "redis://localhost:6379/0"
@@ -88,10 +95,19 @@ class Settings(BaseSettings):
         each part to an int. Non-numeric parts raise ValueError at startup.
         """
         return tuple(
-            int(part.strip())
-            for part in self.ALLOWED_DM_IDS.split(",")
-            if part.strip()
+            int(part.strip()) for part in self.ALLOWED_DM_IDS.split(",") if part.strip()
         )
+
+    @property
+    def default_staff_ids(self) -> tuple[int, ...]:
+        """Parsed env seed list of admin staff ids; blank/junk parts dropped.
+
+        Delegates to the staff service parser so the startup seed and the
+        property can never disagree about what "junk" is.
+        """
+        from bot.services.staff import parse_ids
+
+        return parse_ids(self.DEFAULT_STAFF_IDS)
 
 
 @lru_cache

@@ -1,10 +1,8 @@
 """FastAPI dashboard (Phase 7): Telegram-login auth + per-chat settings.
 
-Отдельное приложение, разделяющее БД с ботом. Доступ только для владельцев
-из ``ALLOWED_DM_IDS`` (см. ``Settings.allowed_dm_ids``): Telegram Login
-принимается, только если id пользователя есть в списке, иначе — 403. Все
-допущенные id управляют всеми чатами. Прежняя модель с Redis-кэшем админов
-(``admin:{chat}:{user}`` = "1") убрана — дашборд owner-only.
+Отдельное приложение, разделяющее БД с ботом. Доступ разрешён владельцу,
+персоналу из env и активному персоналу из БД. Непустой ``ALLOWED_DM_IDS``
+дополнительно сужает этот набор, но сам по себе прав не выдаёт.
 """
 
 from __future__ import annotations
@@ -21,7 +19,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from bot.constants import TOGGLE_FIELDS, TOGGLES
 from bot.db import crud
-from bot.web.auth import verify_telegram_login, verify_telegram_webapp
+from bot.web.auth import has_web_access, verify_telegram_login, verify_telegram_webapp
 
 # Production SPA build (React + Vite). When it exists, "/" serves the SPA and
 # /assets is mounted; otherwise the legacy server-rendered login page below is
@@ -62,21 +60,16 @@ def create_app(settings: Any, session_maker: Any, redis: Any) -> FastAPI:
     app.state.session_maker = session_maker
     app.state.redis = redis
 
-    # JSON API for the webapp frontend (auth: same owner allowlist) +
+    # JSON API for the webapp frontend (auth: same staff gate) +
     # public pre-login endpoints (login config for the SPA login screen).
     from bot.web.api import public_router, router
 
     app.include_router(router)
     app.include_router(public_router)
 
-    async def _can_manage(user_id: int, chat_id: int) -> bool:
-        # Owner-only panel: allowlist members may manage every chat.
-        return user_id in settings.allowed_dm_ids
-
-    async def _managed_chats(session: Any, user_id: int) -> list[Any]:
-        if user_id not in settings.allowed_dm_ids:
-            return []
-        return await crud.list_active_chats(session)
+    async def _can_manage(request: Request, user_id: int) -> bool:
+        # Web staff retain the existing all-chat dashboard scope.
+        return await has_web_access(request, user_id)
 
     if DIST.exists():
         # Production SPA build present → serve the React app. Auth state is
@@ -119,6 +112,11 @@ def create_app(settings: Any, session_maker: Any, redis: Any) -> FastAPI:
         @app.get("/dev-login")
         async def dev_login(request: Request) -> Any:
             """LOCAL DEV ONLY: sign in as OWNER_ID without Telegram."""
+            if not await has_web_access(request, settings.OWNER_ID):
+                return HTMLResponse(
+                    _page("Forbidden", "<h1>403 — Access denied</h1>"),
+                    status_code=403,
+                )
             request.session["user_id"] = settings.OWNER_ID
             request.session["name"] = "dev"
             return RedirectResponse("/", status_code=303)
@@ -135,18 +133,19 @@ def create_app(settings: Any, session_maker: Any, redis: Any) -> FastAPI:
                 _page("Auth failed", "<h1>Authentication failed</h1>"),
                 status_code=401,
             )
-        if int(data["id"]) not in settings.allowed_dm_ids:
-            # Owner-only panel: valid Telegram login, but the user is not in
-            # the allowlist — refuse WITHOUT creating a session.
+        user_id = int(data["id"])
+        if not await has_web_access(request, user_id):
+            # Valid Telegram login, but not authorized staff: refuse without
+            # creating a session.
             return HTMLResponse(
                 _page(
                     "Access denied",
-                    "<h1>403 — Доступ только для владельцев</h1>"
-                    "<p>Access denied. Only the owners may use this panel.</p>",
+                    "<h1>403 — Доступ только для персонала</h1>"
+                    "<p>Access denied. Only staff may use this panel.</p>",
                 ),
                 status_code=403,
             )
-        request.session["user_id"] = int(data["id"])
+        request.session["user_id"] = user_id
         request.session["name"] = data.get("first_name", "")
         # Back to "/" so the SPA boots and sees the new session via /api/me.
         return RedirectResponse("/", status_code=303)
@@ -169,7 +168,7 @@ def create_app(settings: Any, session_maker: Any, redis: Any) -> FastAPI:
         except (TypeError, ValueError):
             user = {}
         user_id = int(user.get("id", 0) or 0)
-        if not user_id or user_id not in settings.allowed_dm_ids:
+        if not user_id or not await has_web_access(request, user_id):
             return JSONResponse(
                 {"ok": False, "error": "not_allowed"}, status_code=403
             )
@@ -187,17 +186,17 @@ def create_app(settings: Any, session_maker: Any, redis: Any) -> FastAPI:
         user_id = _uid(request)
         if user_id is None:
             return RedirectResponse("/", status_code=303)
-        if user_id not in settings.allowed_dm_ids:
+        if not await has_web_access(request, user_id):
             return HTMLResponse(
                 _page(
                     "Forbidden",
-                    "<h1>403 — Доступ только для владельцев</h1>"
-                    "<p>Access denied. Only the owners may use this panel.</p>",
+                    "<h1>403 — Доступ только для персонала</h1>"
+                    "<p>Access denied. Only staff may use this panel.</p>",
                 ),
                 status_code=403,
             )
         async with session_maker() as session:
-            managed = await _managed_chats(session, user_id)
+            managed = await crud.list_active_chats(session)
         if not managed:
             body = "<h1>Your chats</h1><p>No chats you can manage yet.</p>"
         else:
@@ -215,7 +214,7 @@ def create_app(settings: Any, session_maker: Any, redis: Any) -> FastAPI:
         user_id = _uid(request)
         if user_id is None:
             return RedirectResponse("/", status_code=303)
-        if not await _can_manage(user_id, chat_id):
+        if not await _can_manage(request, user_id):
             return HTMLResponse(
                 _page("Forbidden", "<h1>403 — not your chat</h1>"),
                 status_code=403,
@@ -249,7 +248,7 @@ def create_app(settings: Any, session_maker: Any, redis: Any) -> FastAPI:
         user_id = _uid(request)
         if user_id is None:
             return RedirectResponse("/", status_code=303)
-        if not await _can_manage(user_id, chat_id) or field not in _TOGGLE_FIELDS:
+        if not await _can_manage(request, user_id) or field not in _TOGGLE_FIELDS:
             return HTMLResponse(_page("Forbidden", "<h1>403</h1>"), status_code=403)
         async with session_maker() as session:
             settings_obj = await crud.get_or_create_settings(session, chat_id)

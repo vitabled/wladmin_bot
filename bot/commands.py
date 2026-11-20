@@ -1,22 +1,8 @@
 """Register the Telegram command menu (the ☰ button) on startup.
 
-Без ``set_my_commands`` клиент Telegram не показывает список команд и
-автоподсказки — бот выглядит «пустым». Здесь регистрируются два набора,
-локализованные (ru/en):
-
-* ``_ALL_USERS`` (/start /help /info /scam) — для личных чатов (только
-  разрешённые пользователи, см. ``allowed_dm_ids``) и всех участников групп
-  (``BotCommandScopeAllGroupChats``);
-* ``_ADMIN`` (весь набор модерации + /addtowl, поверх общего набора) — для
-  администраторов групп (``BotCommandScopeAllChatAdministrators``).
-
-При включённом DM-локдауне (``ALLOWED_DM_IDS`` не пуст) глобальный скоуп
-личных чатов получает ПУСТОЙ список команд, а ``_ALL_USERS`` выдаётся каждому
-разрешённому пользователю отдельным ``BotCommandScopeChat``.
-
-Админский список содержит и общие команды: семантика слияния скоупов у
-Telegram менялась, и админ не должен терять /scam или /info из-за того, что
-более специфичный скоуп «перекрыл» групповой.
+Private chats expose the storefront commands by default. Staff receive the
+full administration menu in per-chat scopes. Group command scopes retain
+their existing member/administrator split.
 """
 
 from __future__ import annotations
@@ -40,6 +26,13 @@ logger = logging.getLogger(__name__)
 _ALL_USERS: list[tuple[str, dict[str, str]]] = [
     ("help", {"en": "Command help", "ru": "Справка по командам"}),
     ("info", {"en": "Bot info & safety rules", "ru": "Инфо и правила безопасности"}),
+    ("scam", {"en": "Check a seller for scam risk", "ru": "Проверить продавца на скам"}),
+]
+
+_PUBLIC_DM: list[tuple[str, dict[str, str]]] = [
+    ("start", {"en": "Open services", "ru": "Открыть услуги"}),
+    ("help", {"en": "Help", "ru": "Помощь"}),
+    ("services", {"en": "Services", "ru": "Услуги"}),
     ("scam", {"en": "Check a seller for scam risk", "ru": "Проверить продавца на скам"}),
 ]
 
@@ -82,15 +75,18 @@ def _commands(spec: list[tuple[str, dict[str, str]]], lang: str) -> list[BotComm
 
 
 async def setup_bot_commands(
-    bot: Bot, allowed_dm_ids: tuple[int, ...] = ()
+    bot: Bot,
+    allowed_dm_ids: tuple[int, ...] = (),
+    *,
+    staff_ids: tuple[int, ...] = (),
 ) -> None:
     """Populate the ☰ menu per role scope (best-effort, non-fatal).
 
     Groups: every member sees ``_ALL_USERS``; administrators additionally see
-    ``_ADMIN`` (full moderation + /addtowl). Private chats: when
-    ``allowed_dm_ids`` is set, the global private scope gets an EMPTY list
-    (non-allowed users see no menu) and each allowed user gets ``_ALL_USERS``
-    via a per-chat scope; when it is empty, everyone sees ``_ALL_USERS``.
+    ``_ADMIN`` (full moderation + /addtowl). Private chats are public, with
+    per-chat admin scopes only for staff. The legacy ``allowed_dm_ids``
+    parameter resets formerly allowlisted per-chat scopes to the public menu;
+    it never grants staff privileges.
     """
     group_scope = BotCommandScopeAllGroupChats()
     admin_scope = BotCommandScopeAllChatAdministrators()
@@ -108,30 +104,19 @@ async def setup_bot_commands(
         await bot.set_my_commands(_commands(_ALL_USERS, "en"), scope=group_scope)
         await bot.set_my_commands(_commands(_ADMIN, "en"), scope=admin_scope)
 
-        if allowed_dm_ids:
-            # DM lockdown: hide the menu from everyone by default, then expose
-            # _ALL_USERS only to the allowlisted users via per-chat scopes.
-            for lang in _LANGS:
-                await bot.set_my_commands([], scope=private_scope, language_code=lang)
-                for user_id in allowed_dm_ids:
-                    await bot.set_my_commands(
-                        _commands(_ALL_USERS, lang),
-                        scope=BotCommandScopeChat(chat_id=user_id),
-                        language_code=lang,
-                    )
-            await bot.set_my_commands([], scope=private_scope)
-            for user_id in allowed_dm_ids:
+        staff = set(staff_ids)
+        for lang in (*_LANGS, ""):
+            await bot.set_my_commands(
+                _commands(_PUBLIC_DM, lang or "en"),
+                scope=private_scope,
+                language_code=lang,
+            )
+            for user_id in sorted(staff | set(allowed_dm_ids)):
                 await bot.set_my_commands(
-                    _commands(_ALL_USERS, "en"),
+                    _commands(_ADMIN if user_id in staff else _PUBLIC_DM, lang or "en"),
                     scope=BotCommandScopeChat(chat_id=user_id),
+                    language_code=lang,
                 )
-        else:
-            # Legacy: every private chat sees _ALL_USERS.
-            for lang in _LANGS:
-                await bot.set_my_commands(
-                    _commands(_ALL_USERS, lang), scope=private_scope, language_code=lang
-                )
-            await bot.set_my_commands(_commands(_ALL_USERS, "en"), scope=private_scope)
 
         logger.info("bot_commands.set")
     except Exception:

@@ -1,9 +1,4 @@
-"""Integration tests for the FastAPI dashboard (Phase 7).
-
-Webapp is owner-only: access is granted to users in ``allowed_dm_ids`` only
-(Holv + Alex); everyone else gets 403 and no session. The old Redis
-admin-cache model (``admin:{chat}:{user}``) no longer exists.
-"""
+"""Integration tests for the FastAPI dashboard (Phase 7)."""
 
 from __future__ import annotations
 
@@ -26,6 +21,7 @@ def _settings(**overrides):
     base = dict(
         TELEGRAM_BOT_TOKEN="123:abc",
         OWNER_ID=999,
+        default_staff_ids=(700,),
         WEB_BOT_USERNAME="mybot",
         WEB_SESSION_SECRET="test-secret",
         WEBHOOK_SECRET="wh",
@@ -126,7 +122,7 @@ def test_denied_login_returns_403_and_no_session(client, monkeypatch):
         follow_redirects=False,
     )
     assert r.status_code == 403
-    assert "Доступ только для владельцев" in r.text
+    assert "Доступ только для персонала" in r.text
     # No session was created → /chats still requires login.
     r2 = client.get("/chats", follow_redirects=False)
     assert r2.status_code == 303
@@ -170,23 +166,23 @@ def test_non_allowed_session_gets_403(redis, monkeypatch):
     monkeypatch.setattr(crud, "get_chat", AsyncMock(return_value=SimpleNamespace(title="X")))
     monkeypatch.setattr(crud, "get_or_create_settings", AsyncMock(return_value=_settings_obj()))
     monkeypatch.setattr(crud, "chat_activity_totals", AsyncMock(return_value=(0, 0)))
-    # OWNER_ID=999 is NOT allowlisted here (only 700 is); dev-login creates a
-    # session for 999, which must then be denied.
+    # OWNER_ID=999 is staff but NOT allowlisted here (only 700 is), so the
+    # additional whitelist rejects dev login before creating a session.
     app = create_app(
         _settings(WEB_DEV_LOGIN=True, OWNER_ID=999, allowed_dm_ids=(700,)),
         lambda: _SessionCM(AsyncMock()),  # noqa: E731
         redis,
     )
     dev_client = TestClient(app)
-    assert dev_client.get("/dev-login", follow_redirects=False).status_code == 303
-    assert dev_client.get("/chats", follow_redirects=False).status_code == 403
-    assert dev_client.get("/chats/-100", follow_redirects=False).status_code == 403
+    assert dev_client.get("/dev-login", follow_redirects=False).status_code == 403
+    assert dev_client.get("/chats", follow_redirects=False).status_code == 303
+    assert dev_client.get("/chats/-100", follow_redirects=False).status_code == 303
     assert (
         dev_client.post(
             "/chats/-100/toggle", data={"field": "welcome_enabled"},
             follow_redirects=False,
         ).status_code
-        == 403
+        == 303
     )
 
 

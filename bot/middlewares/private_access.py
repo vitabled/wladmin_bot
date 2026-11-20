@@ -1,7 +1,8 @@
-"""Private-chat access gate: only allowlisted users may talk to the bot in ЛС.
+"""Legacy private-chat gate, now permitting every direct message.
 
-Group chats are never restricted — moderation must keep working for everyone.
-An empty allowlist disables the gate entirely (legacy behavior).
+Group chats continue through unchanged. The allowlist argument remains accepted
+so existing dispatcher wiring is backward-compatible while role filters protect
+staff-only surfaces.
 """
 
 from __future__ import annotations
@@ -19,11 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class PrivateAccessMiddleware(BaseMiddleware):
-    """Silently drop private-chat events from users outside the allowlist.
-
-    Registered as the outermost middleware so unlisted users never reach
-    downstream middlewares (DB session, admin checks) or handlers.
-    """
+    """Pass every event while recording public private-chat access."""
 
     def __init__(self, allowed_dm_ids: tuple[int, ...] = ()) -> None:
         self.allowed_dm_ids = frozenset(allowed_dm_ids)
@@ -35,20 +32,16 @@ class PrivateAccessMiddleware(BaseMiddleware):
         data: dict[str, Any],
     ) -> Any:
         chat = data.get("event_chat") or extract_chat(event)
-        # Groups always pass; an empty allowlist means "no restriction".
-        if is_group(chat) or not self.allowed_dm_ids:
+        if is_group(chat):
             return await handler(event, data)
 
-        # Private chat with an active allowlist: require a known user.
         user = data.get("event_user") or extract_user(event)
-        if user is None or user.id not in self.allowed_dm_ids:
-            logger.info(
-                "dm.blocked",
-                extra={
-                    "user_id": user.id if user is not None else None,
-                    "chat_id": chat.id if chat is not None else None,
-                },
-            )
-            return None
+        logger.info(
+            "dm.public",
+            extra={
+                "user_id": user.id if user is not None else None,
+                "chat_id": chat.id if chat is not None else None,
+            },
+        )
 
         return await handler(event, data)

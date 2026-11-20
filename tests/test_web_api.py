@@ -27,6 +27,7 @@ def _settings(**overrides):
     base = dict(
         TELEGRAM_BOT_TOKEN="123:abc",
         OWNER_ID=999,
+        default_staff_ids=(700,),
         WEB_BOT_USERNAME="mybot",
         WEB_SESSION_SECRET="test-secret",
         WEBHOOK_SECRET="wh",
@@ -102,8 +103,8 @@ def test_api_me_non_allowed_session_403(redis):
         redis,
     )
     dev_client = TestClient(app)
-    assert dev_client.get("/dev-login", follow_redirects=False).status_code == 303
-    assert dev_client.get("/api/me").status_code == 403
+    assert dev_client.get("/dev-login", follow_redirects=False).status_code == 403
+    assert dev_client.get("/api/me").status_code == 401
 
 
 def test_api_me_allowed_200(client, monkeypatch):

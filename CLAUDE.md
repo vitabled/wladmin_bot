@@ -39,9 +39,13 @@
 - `bot/services/warns.py` — Warn counting and action triggers
 - `bot/services/captcha.py` — Math/emoji/button captcha generation
 - `bot/services/moderation.py` — Duration parsing, unban date calculation
+- `bot/services/staff.py` — Staff roles, default owner/admin seeds, active registry and 60-second Redis role cache
 
 ### Handlers & Filters
 - `bot/handlers/common.py` — /start, /help (localized)
+- `bot/handlers/dm_shop.py` — Public private-chat storefront placeholder (/start, /help, /services)
+- `bot/handlers/dm_menu.py` — Staff-only private admin menu and dm:* callbacks
+- `bot/filters/staff.py` — Minimum staff-role filter, separate from group admin permissions
 - `bot/handlers/moderation.py` — /ban /unban /kick /mute /unmute /warn /unwarn /warns
 - `bot/handlers/settings_cmd.py` — /settings, /welcome, /captcha, /antispam, /addstop …
 - `bot/handlers/captcha.py` — New-member captcha (restrict → challenge → verify/timeout)
@@ -69,6 +73,13 @@
 - `bot/middlewares/settings.py` — Auto-register chat, load settings (Redis→DB)
 - `bot/middlewares/i18n.py` — Locale resolution + `_` translator injection
 - `bot/middlewares/admin.py` — is_admin/is_owner detection (Redis-cached)
+- `bot/middlewares/private_access.py` — Public DMs; existing group access restrictions
+
+Staff membership is stored in `staff_members`. Startup seeds `OWNER_ID` as
+`owner` and `DEFAULT_STAFF_IDS` (CSV) as `admin`. Active database members can
+also be `moderator`. Private administration and the web dashboard require a
+staff role; group moderation still uses Telegram chat administrator status.
+The public storefront is a placeholder only; payments are not implemented here.
 
 ### Infrastructure
 - `bot/db/crud.py` — Async data-access layer (repository functions)
@@ -96,6 +107,8 @@
 - `tests/test_federation.py` — federation name normalize/validate (service)
 - `tests/test_handlers_federation.py` — /fcreate /fjoin /fban /funban + cross-chat propagation
 - `tests/test_commands.py` — ☰ command-menu registration
+- `tests/test_staff.py` — Role order, tolerant ID parsing, seed idempotency and cache invalidation
+- `tests/test_staff_gate.py` — Staff middleware/filter, public DMs and private admin access boundaries
 - `tests/test_warns.py` — Warn system logic (service)
 - `tests/test_captcha.py` — Captcha generation/verification (service)
 - `tests/test_moderation.py` — Duration parsing, ban dates (service)

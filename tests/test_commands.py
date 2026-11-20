@@ -66,15 +66,14 @@ async def test_setup_registers_scopes_with_empty_allowlist():
     assert private_calls
     for call in private_calls:
         names = [c.command for c in call.args[0]]
-        assert names == ["help", "info", "scam"]
+        assert names == ["start", "help", "services", "scam"]
 
 
-async def test_setup_registers_per_chat_scopes_for_allowed_dm_ids():
-    # DM lockdown: global private scope is emptied, each allowed user gets
-    # _ALL_USERS via BotCommandScopeChat; groups/admins unchanged.
+async def test_setup_registers_per_chat_scopes_only_for_staff():
+    # Legacy allowlisted users receive the public menu, not staff privileges.
     bot = MagicMock()
     bot.set_my_commands = AsyncMock()
-    await setup_bot_commands(bot, allowed_dm_ids=(111, 222))
+    await setup_bot_commands(bot, allowed_dm_ids=(111,), staff_ids=(222,))
     # 2 langs × (group + admin + private-empty + 2 per-chat) + same for the
     # language-agnostic fallback = 15 registrations.
     assert bot.set_my_commands.await_count == 15
@@ -88,7 +87,7 @@ async def test_setup_registers_per_chat_scopes_for_allowed_dm_ids():
         BotCommandScopeChat(chat_id=111).type,
     }
 
-    # Global private scope must be EMPTY so non-allowed users see no menu.
+    # All private chats receive the public storefront commands.
     private_calls = [
         call
         for call in calls
@@ -96,9 +95,11 @@ async def test_setup_registers_per_chat_scopes_for_allowed_dm_ids():
     ]
     assert private_calls
     for call in private_calls:
-        assert call.args[0] == []
+        assert [c.command for c in call.args[0]] == [
+            "start", "help", "services", "scam"
+        ]
 
-    # Each allowed user gets the full _ALL_USERS list per-chat (2 langs + fallback).
+    # Staff get the admin menu; old allowlist scopes are reset to public.
     chat_calls = [
         call for call in calls if call.kwargs["scope"].type == "chat"
     ]
@@ -107,7 +108,10 @@ async def test_setup_registers_per_chat_scopes_for_allowed_dm_ids():
     assert chat_ids == {111, 222}
     for call in chat_calls:
         names = [c.command for c in call.args[0]]
-        assert names == ["help", "info", "scam"]
+        if call.kwargs["scope"].chat_id == 222:
+            assert names == [name for name, _ in _ADMIN]
+        else:
+            assert names == ["start", "help", "services", "scam"]
 
     # Groups keep the same _ALL_USERS list as before.
     group_calls = [
@@ -153,3 +157,25 @@ async def test_setup_swallows_errors():
     bot.set_my_commands = AsyncMock(side_effect=RuntimeError("telegram down"))
     # Must not raise — startup continues even if the menu can't be set.
     await setup_bot_commands(bot)
+
+
+async def test_staff_ids_are_deduplicated_and_override_legacy_allowlist():
+    bot = MagicMock()
+    bot.set_my_commands = AsyncMock()
+
+    await setup_bot_commands(
+        bot, allowed_dm_ids=(111, 222), staff_ids=(222, 222, 333)
+    )
+
+    chat_calls = [
+        call
+        for call in bot.set_my_commands.await_args_list
+        if call.kwargs["scope"].type == "chat"
+    ]
+    assert len(chat_calls) == 9
+    for call in chat_calls:
+        names = [command.command for command in call.args[0]]
+        if call.kwargs["scope"].chat_id in (222, 333):
+            assert names == [name for name, _ in _ADMIN]
+        else:
+            assert names == ["start", "help", "services", "scam"]

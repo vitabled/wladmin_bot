@@ -1,4 +1,4 @@
-"""Tests for the private-chat access gate middleware (ЛС lockdown)."""
+"""Tests for the now-public private-chat access middleware."""
 
 from __future__ import annotations
 
@@ -54,22 +54,22 @@ async def test_second_allowed_user_in_private_chat_passes():
     assert result == "handled"
 
 
-async def test_non_allowed_user_in_private_chat_is_dropped_and_logged(caplog):
+async def test_non_allowed_user_in_private_chat_passes_and_is_logged(caplog):
     mw = PrivateAccessMiddleware(ALLOWED)
     handler = _make_handler()
     with caplog.at_level(logging.INFO, logger="bot.middlewares.private_access"):
         result = await mw(handler, _private_event(INTRUDER), {})
-    assert result is None
-    handler.assert_not_awaited()
-    assert "dm.blocked" in caplog.text
+    assert result == "handled"
+    handler.assert_awaited_once()
+    assert "dm.public" in caplog.text
 
 
-async def test_missing_user_in_private_chat_is_dropped():
+async def test_missing_user_in_private_chat_passes():
     mw = PrivateAccessMiddleware(ALLOWED)
     handler = _make_handler()
     result = await mw(handler, _private_event(user_id=None), {})
-    assert result is None
-    handler.assert_not_awaited()
+    assert result == "handled"
+    handler.assert_awaited_once()
 
 
 async def test_group_chat_always_passes_even_for_non_allowed_user():

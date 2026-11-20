@@ -14,9 +14,39 @@ import hmac
 import time
 import urllib.parse
 from collections.abc import Mapping
+from typing import Any
+
+from fastapi import Request
 
 # Default max age of a login payload (24h) before it's considered stale.
 DEFAULT_MAX_AGE = 86_400
+
+
+async def get_role_cached(session: Any, redis: Any, user_id: int) -> Any:
+    """Resolve a database staff role through the shared cached service."""
+    from bot.services.staff import get_role_cached as resolve_role
+
+    return await resolve_role(session, redis, user_id)
+
+
+async def has_web_access(request: Request, user_id: int) -> bool:
+    """Return whether a user is staff and passes the optional legacy whitelist.
+
+    Staff identity is the union of the configured owner, env-provided default
+    staff, and active database roles.  A non-empty ``ALLOWED_DM_IDS`` narrows
+    that union; it never grants access by itself.
+    """
+    settings = request.app.state.settings
+    allowed_ids = settings.allowed_dm_ids
+    if allowed_ids and user_id not in allowed_ids:
+        return False
+    if user_id == settings.OWNER_ID or user_id in getattr(
+        settings, "default_staff_ids", ()
+    ):
+        return True
+    async with request.app.state.session_maker() as session:
+        role = await get_role_cached(session, request.app.state.redis, user_id)
+    return role is not None
 
 
 def build_data_check_string(data: Mapping[str, str]) -> str:

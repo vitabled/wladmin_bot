@@ -38,3 +38,6 @@ htmlcov/
 # local junk
 ref/
 venv/
+
+# Local agent runtime artifacts
+.omo/

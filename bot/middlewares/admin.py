@@ -16,6 +16,11 @@ from aiogram.types import TelegramObject
 
 from bot.cache.redis import RedisClient
 from bot.middlewares.base import extract_chat, extract_user, is_group
+from bot.services.staff import (
+    ROLE_ADMIN,
+    ROLE_OWNER,
+    get_role_cached,
+)
 from bot.utils.telegram import get_chat_member_status
 
 logger = logging.getLogger(__name__)
@@ -27,9 +32,16 @@ _ANON_BOT_ID = 1087968824
 class AdminMiddleware(BaseMiddleware):
     """Compute whether the acting user is an admin/owner of the chat."""
 
-    def __init__(self, redis: RedisClient, owner_id: int, cache_ttl: int = 300) -> None:
+    def __init__(
+        self,
+        redis: RedisClient,
+        owner_id: int,
+        default_staff_ids: tuple[int, ...] = (),
+        cache_ttl: int = 300,
+    ) -> None:
         self.redis = redis
         self.owner_id = owner_id
+        self.default_staff_ids = frozenset(default_staff_ids)
         self.cache_ttl = cache_ttl
 
     async def _is_admin_cached(self, bot: Bot, chat_id: int, user_id: int) -> bool:
@@ -54,6 +66,16 @@ class AdminMiddleware(BaseMiddleware):
 
         is_owner = bool(user is not None and user.id == self.owner_id)
         is_admin = is_owner
+        staff_role = None
+
+        if user is not None:
+            session = data.get("session")
+            if session is not None:
+                staff_role = await get_role_cached(session, self.redis, user.id)
+            elif is_owner:
+                staff_role = ROLE_OWNER
+            elif user.id in self.default_staff_ids:
+                staff_role = ROLE_ADMIN
 
         if not is_admin and is_group(chat) and user is not None:
             sender_chat = getattr(event, "sender_chat", None)
@@ -67,5 +89,7 @@ class AdminMiddleware(BaseMiddleware):
 
         data["is_owner"] = is_owner
         data["is_admin"] = is_admin
+        data["staff_role"] = staff_role
+        data["is_staff"] = staff_role is not None
         data["owner_id"] = self.owner_id
         return await handler(event, data)

@@ -2,8 +2,8 @@
 
 Read-only dashboard data + mutation endpoints (toggles, slow mode, scam
 whitelist) + a topic-aware broadcast action. Auth mirrors the HTML panel:
-only users in ``Settings.allowed_dm_ids`` (owner-only allowlist) may call
-any endpoint — 401 without a session, 403 with a non-allowlisted session.
+staff users may call endpoints, optionally narrowed by ``ALLOWED_DM_IDS``.
+Requests without a session get 401; denied sessions get 403.
 
 Router functions reach shared services via ``request.app.state``
 (settings / session_maker / redis), mirroring ``create_app``.
@@ -24,6 +24,7 @@ from bot.db import crud
 from bot.handlers.scam import build_scam_body
 from bot.i18n.loader import get_i18n
 from bot.services.broadcast import send_broadcast
+from bot.web.auth import has_web_access
 
 SLOW_MODE_MIN = 60
 SLOW_MODE_MAX = 30 * 86400  # 30 days
@@ -63,11 +64,11 @@ async def _resolve_username(settings: Any, target: str) -> tuple[int, str] | Non
 
 
 async def require_user(request: Request) -> int:
-    """Auth dependency: allowlist members only (401 no session, 403 denied)."""
+    """Require a current staff session (401 absent, 403 unauthorized)."""
     user_id = request.session.get("user_id")
     if user_id is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    if user_id not in request.app.state.settings.allowed_dm_ids:
+    if not await has_web_access(request, user_id):
         raise HTTPException(status_code=403, detail="Access denied")
     return user_id
 
@@ -103,7 +104,7 @@ class BroadcastIn(BaseModel):
 
 @router.get("/me")
 async def api_me(request: Request, user_id: int = Depends(require_user)) -> dict:
-    """Current allowlisted user (for the frontend header)."""
+    """Current authorized staff user (for the frontend header)."""
     return {"user_id": user_id, "name": request.session.get("name", "")}
 
 

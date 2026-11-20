@@ -32,7 +32,7 @@ from collections.abc import Callable
 from typing import Any
 
 from aiogram import Bot, F, Router, types
-from aiogram.filters import CommandStart, StateFilter
+from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -41,7 +41,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.constants import SCAM_SOURCE_SCAM, SCAM_SOURCE_VERIFIED, TOP_DEFAULT
 from bot.db import crud
 from bot.filters.chat_type import IsPrivate
-from bot.handlers import actions
+from bot.filters.staff import IsStaff
+from bot.handlers import actions, dm_shop
 from bot.handlers.menu import _TOGGLE_FIELDS, build_menu
 from bot.handlers.moderation import _reason_suffix, prepare_action
 from bot.handlers.scam import build_scam_verdict, map_scam_error
@@ -575,27 +576,37 @@ async def _edit_or_answer(
     await callback.message.answer(text, reply_markup=kb, parse_mode="HTML")
 
 
-@router.message(IsPrivate(), CommandStart())
+@router.message(IsPrivate(), IsStaff(), CommandStart())
+@router.message(IsPrivate(), IsStaff(), Command("menu"))
 async def dm_start(message: types.Message, **data: Any) -> None:
-    """/start in a private chat → welcome text + main-menu keyboard."""
+    """/start or /menu in a staff private chat → admin main menu."""
     _ = data["_"]
     _raw = data["_raw"]
     await message.answer(_("dm_menu_welcome"), reply_markup=build_main_menu(_raw))
 
 
-@router.message(IsPrivate(), F.text & ~F.text.startswith("/"), StateFilter(None))
+@router.message(
+    IsPrivate(),
+    F.text & ~F.text.startswith("/"),
+    StateFilter(None),
+)
 async def dm_any_text(message: types.Message, **data: Any) -> None:
     """Any plain text in PM (no active FSM state) re-shows the main menu.
 
     Commands are excluded so ``/scam``, ``/addtowl`` and friends keep
-    working in DM via their own routers.
+    working in DM via their own routers. Nonstaff users (middleware always
+    injects ``staff_role``) get the public storefront instead of the admin
+    menu; a missing key (direct handler calls) preserves the admin menu.
     """
     _ = data["_"]
     _raw = data["_raw"]
+    if "staff_role" in data and data["staff_role"] is None:
+        await dm_shop.answer_shop(message, _, _raw)
+        return
     await message.answer(_("dm_menu_title"), reply_markup=build_main_menu(_raw))
 
 
-@router.callback_query(F.data.startswith(f"{_PREFIX}:"))
+@router.callback_query(F.data.startswith(f"{_PREFIX}:"), IsStaff())
 async def on_dm_callback(
     callback: types.CallbackQuery, state: FSMContext, **data: Any
 ) -> None:
@@ -702,6 +713,12 @@ async def on_dm_callback(
 
     # Unknown dm:* action — acknowledge and ignore.
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith(f"{_PREFIX}:"))
+async def deny_dm_callback(callback: types.CallbackQuery, **data: Any) -> None:
+    """Politely reject every admin-menu callback from a nonstaff user."""
+    await callback.answer(data["_"]("dm_staff_denied"), show_alert=True)
 
 
 async def _dm_groups(
@@ -1340,7 +1357,7 @@ async def _dm_broadcast_go(
 # --------------------------------------------------------------------------- #
 # FSM message handlers
 # --------------------------------------------------------------------------- #
-@router.message(IsPrivate(), StateFilter(DmScam.awaiting_target))
+@router.message(IsPrivate(), IsStaff(), StateFilter(DmScam.awaiting_target))
 async def dm_scam_target(
     message: types.Message, state: FSMContext, **data: Any
 ) -> None:
@@ -1401,7 +1418,7 @@ async def dm_scam_target(
     )
 
 
-@router.message(IsPrivate(), StateFilter(DmAdmin.awaiting_target))
+@router.message(IsPrivate(), IsStaff(), StateFilter(DmAdmin.awaiting_target))
 async def dm_admin_target(
     message: types.Message, state: FSMContext, **data: Any
 ) -> None:
@@ -1618,7 +1635,12 @@ async def dm_admin_target(
     await message.answer(text, parse_mode="HTML", reply_markup=back_kb)
 
 
-@router.message(IsPrivate(), F.text, StateFilter(DmSlowMode.awaiting_config))
+@router.message(
+    IsPrivate(),
+    IsStaff(),
+    F.text,
+    StateFilter(DmSlowMode.awaiting_config),
+)
 async def dm_slow_mode_config(
     message: types.Message, state: FSMContext, **data: Any
 ) -> None:
@@ -1721,7 +1743,7 @@ async def dm_slow_mode_config(
     )
 
 
-@router.message(IsPrivate(), F.text, StateFilter(DmWl.awaiting_target))
+@router.message(IsPrivate(), IsStaff(), F.text, StateFilter(DmWl.awaiting_target))
 async def dm_wl_target(
     message: types.Message, state: FSMContext, **data: Any
 ) -> None:
@@ -1770,7 +1792,12 @@ async def dm_wl_target(
     )
 
 
-@router.message(IsPrivate(), F.text, StateFilter(DmBroadcast.awaiting_text))
+@router.message(
+    IsPrivate(),
+    IsStaff(),
+    F.text,
+    StateFilter(DmBroadcast.awaiting_text),
+)
 async def dm_broadcast_text(
     message: types.Message, state: FSMContext, **data: Any
 ) -> None:

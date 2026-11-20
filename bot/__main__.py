@@ -20,6 +20,7 @@ from bot.handlers import (
     captcha,
     common,
     dm_menu,
+    dm_shop,
     federation,
     menu,
     moderation,
@@ -37,6 +38,7 @@ from bot.middlewares.private_access import PrivateAccessMiddleware
 from bot.middlewares.settings import SettingsMiddleware
 from bot.middlewares.slow_mode import SlowModeMiddleware
 from bot.scheduler import run_scheduler
+from bot.services.staff import list_staff, seed_defaults
 from bot.utils.tasks import cancel_all, spawn
 
 logger = logging.getLogger(__name__)
@@ -57,6 +59,7 @@ def build_dispatcher(
     owner_id: int,
     cache_ttl: int,
     allowed_dm_ids: tuple[int, ...],
+    default_staff_ids: tuple[int, ...] = (),
 ) -> Dispatcher:
     """Create the Dispatcher, register middlewares (outer) and routers."""
     storage = RedisStorage.from_url(get_settings().REDIS_URL)
@@ -71,7 +74,7 @@ def build_dispatcher(
         observer.outer_middleware(DatabaseMiddleware(session_maker))
         observer.outer_middleware(SettingsMiddleware(redis, cache_ttl))
         observer.outer_middleware(I18nMiddleware(i18n))
-        observer.outer_middleware(AdminMiddleware(redis, owner_id))
+        observer.outer_middleware(AdminMiddleware(redis, owner_id, default_staff_ids))
 
     # Slow mode is the INNERMOST message middleware (runs after the admin
     # check above) and only on dp.message: edited messages and callbacks are
@@ -79,9 +82,11 @@ def build_dispatcher(
     dp.message.outer_middleware(SlowModeMiddleware())
 
     # Order matters: specific command/event routers first, catch-all antispam last.
-    # dm_menu goes BEFORE common so private /start and private text hit the
-    # button interface first; group behavior is untouched (dm_menu is private-only).
+    # dm_menu goes BEFORE dm_shop/common so private staff hit the admin menu;
+    # dm_shop then serves the public storefront to everyone else and denies
+    # admin commands before they reach the staff-only routers.
     dp.include_router(dm_menu.router)
+    dp.include_router(dm_shop.router)
     dp.include_router(common.router)
     dp.include_router(menu.router)
     dp.include_router(settings_cmd.router)
@@ -97,6 +102,40 @@ def build_dispatcher(
     dp["redis"] = redis
     dp["session_maker"] = session_maker
     return dp
+
+
+async def _setup_staff(
+    bot: Bot,
+    settings: Settings,
+    session_maker,
+    redis: RedisClient,
+) -> None:
+    """Seed staff roles, then register their per-chat command scopes.
+
+    Runs after migrations so ``staff_members`` exists. ``OWNER_ID`` and
+    ``DEFAULT_STAFF_IDS`` are seeded idempotently; the seed list is unioned
+    with every active DB member (and the owner) for the admin command menu.
+    """
+    async with session_maker() as session:
+        await seed_defaults(
+            session,
+            settings.OWNER_ID,
+            settings.default_staff_ids,
+            redis=redis,
+        )
+        await session.commit()
+        members = await list_staff(session)
+
+    staff_ids: list[int] = [settings.OWNER_ID, *settings.default_staff_ids]
+    for member in members:
+        if member.user_id not in staff_ids:
+            staff_ids.append(member.user_id)
+
+    await setup_bot_commands(
+        bot,
+        allowed_dm_ids=settings.allowed_dm_ids,
+        staff_ids=tuple(staff_ids),
+    )
 
 
 async def _run_polling(
@@ -130,7 +169,7 @@ async def _run_polling(
     except Exception:
         logger.exception("delete_webhook.failed")
 
-    await setup_bot_commands(bot, allowed_dm_ids=settings.allowed_dm_ids)
+    await _setup_staff(bot, settings, session_maker, redis)
     spawn(run_scheduler(bot, session_maker))
     logger.info("scheduler.spawned")
     logger.info("bot.started (polling mode)")
@@ -189,8 +228,8 @@ async def on_startup(app: web.Application) -> None:
     except Exception:
         logger.exception("set_webhook.failed")
 
-    # Populate the ☰ command menu (best-effort, non-fatal).
-    await setup_bot_commands(bot, allowed_dm_ids=settings.allowed_dm_ids)
+    # Populate the ☰ command menu (best-effort, non-fatal); seeds staff first.
+    await _setup_staff(bot, settings, app["session_maker"], redis)
 
     # Start the scheduled-posting worker (cancelled on shutdown by cancel_all).
     spawn(run_scheduler(bot, app["session_maker"]))
@@ -228,6 +267,7 @@ def main() -> None:
         settings.OWNER_ID,
         settings.SETTINGS_CACHE_TTL,
         settings.allowed_dm_ids,
+        settings.default_staff_ids,
     )
 
     if settings.BOT_MODE.lower() == "polling":

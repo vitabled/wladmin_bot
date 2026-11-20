@@ -371,3 +371,25 @@ class ScamList(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class StaffMember(Base):
+    """Bot-wide staff role registry (source of truth for admin access).
+
+    Distinct from per-chat Telegram administrator status: a staff member may
+    hold ``owner`` / ``admin`` / ``moderator`` and reaches every staff-only
+    surface. ``is_active`` soft-disables a member without losing the audit row.
+    """
+
+    __tablename__ = "staff_members"
+
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, autoincrement=False
+    )
+    role: Mapped[str] = mapped_column(String(16))
+    title: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    added_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    added_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
